@@ -46,6 +46,41 @@ function beep(freq, at, dur = 0.18) {
   o.start(at); o.stop(at + dur + 0.02);
 }
 
+const voiceQueue = [];
+let speaking = false;
+
+function playNextVoice() {
+  if (speaking) return;
+  while (voiceQueue.length) {
+    const {text, channel} = voiceQueue.shift();
+    if (!getVoice() || !isAlarmEnabled(channel)) continue;
+    speaking = true;
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timeout);
+      speaking = false;
+      playNextVoice();
+    };
+    const timeout = setTimeout(() => {
+      if (done) return;
+      try { speechSynthesis.cancel(); } finally { finish(); }
+    }, 8000);
+    try {
+      const speech = new SpeechSynthesisUtterance(text);
+      speech.lang = 'ko-KR';
+      speech.volume = getVoiceVolume() / 100;
+      speech.onend = finish;
+      speech.onerror = finish;
+      speechSynthesis.speak(speech);
+    } catch {
+      finish();
+    }
+    return;
+  }
+}
+
 /** kind: 'info'(1회) | 'alert'(3회) */
 export function notify(text, kind = 'info', channel='general') {
   const audible=isAlarmEnabled(channel);
@@ -55,13 +90,8 @@ export function notify(text, kind = 'info', channel='general') {
   } catch (e) { /* 무시 */ }
 
   if (audible && getVoice() && typeof speechSynthesis !== 'undefined') {
-    try {
-      speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = 'ko-KR';
-      u.volume = getVoiceVolume() / 100;
-      speechSynthesis.speak(u);
-    } catch (e) { /* 무시 */ }
+    if (voiceQueue.length < 12) voiceQueue.push({text, channel});
+    playNextVoice();
   }
   subs.forEach(fn => fn({ text, kind, channel, muted:!audible, at: Date.now() }));
 }

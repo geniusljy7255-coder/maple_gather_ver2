@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 const saved=new Map();globalThis.localStorage={getItem:k=>saved.get(k)??null,setItem:(k,v)=>saved.set(k,String(v))};
 let beeps=0,voices=0;globalThis.AudioContext=class {state='running';currentTime=0;destination={};createOscillator(){return {frequency:{},connect(){},start(){beeps++;},stop(){}};}createGain(){return {gain:{setValueAtTime(){},exponentialRampToValueAtTime(){}},connect(){}};}};
-globalThis.SpeechSynthesisUtterance=class{};globalThis.speechSynthesis={cancel(){},speak(){voices++;}};
+globalThis.SpeechSynthesisUtterance=class{constructor(text){this.text=text}};globalThis.speechSynthesis={cancel(){},speak(speech){voices++;speech.onend?.();}};
 const N=await import('../js/core/notify.js');
 test('per-alarm mute suppresses sound and speech without suppressing event logs',()=>{
  const events=[];N.onNotify(e=>events.push(e));N.setAlarmEnabled('collect',false);
@@ -40,4 +40,25 @@ test('master and individual alarm controls stay in sync',()=>{
  }
  master.checked=true;master.handlers.change();
  assert.ok(N.ALARM_CHANNELS.every(c=>N.isAlarmEnabled(c.id)));
+});
+
+test('overlapping announcements play in order and recover from a speech error',()=>{
+ const previous = speechSynthesis.speak;
+ const spoken = [];
+ speechSynthesis.speak = utterance => spoken.push(utterance);
+ try {
+   N.setVoice(true);
+   N.notify('first','alert','collect');
+   N.notify('second','alert','janus');
+   N.notify('third','alert','fountain');
+   assert.equal(spoken.length,1);
+   spoken[0].onend();
+   assert.equal(spoken[1].text,'second');
+   spoken[1].onerror();
+   assert.equal(spoken[2].text,'third');
+   spoken[2].onend();
+ } finally {
+   speechSynthesis.speak = previous;
+   for (const item of spoken) item.onend();
+ }
 });

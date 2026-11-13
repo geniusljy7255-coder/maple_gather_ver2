@@ -70,7 +70,22 @@ export function readDigits(rgba,size,options={}) {
   let count=0;
   for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++) {
     const p=(y*size+x)*4,r=rgba[p],g=rgba[p+1],b=rgba[p+2];
-    if(options.dark ? Math.max(r,g,b)<105 && Math.max(r,g,b)-Math.min(r,g,b)<50 : options.light ? Math.min(r,g,b)>150 && Math.max(r,g,b)-Math.min(r,g,b)<100 : r>140 && g>115 && Math.min(r,g)-b>65 && g>r*.60) {mask[y*size+x]=1;count++;}
+    const yellow = r>140 && g>115 && Math.min(r,g)-b>65 && g>r*.60;
+    const selected = options.dark
+      ? Math.max(r,g,b)<105 && Math.max(r,g,b)-Math.min(r,g,b)<50
+      : options.light
+        ? Math.min(r,g,b)>150 && Math.max(r,g,b)-Math.min(r,g,b)<100
+        : yellow;
+    if (!selected) continue;
+    const base = options.background;
+    if (base && base[p+3]>=128) {
+      const br=base[p], bg=base[p+1], bb=base[p+2];
+      const sameColor=Math.max(Math.abs(r-br),Math.abs(g-bg),Math.abs(b-bb))<=45;
+      const baseYellow=br>140 && bg>115 && Math.min(br,bg)-bb>65 && bg>br*.60;
+      if (sameColor || (!options.light && baseYellow && r<br+25 && g<bg+25)) continue;
+    }
+    mask[y*size+x]=1;
+    count++;
   }
   const runs=[]; let start=null;
   for(let x=x0;x<=x1;x++) {

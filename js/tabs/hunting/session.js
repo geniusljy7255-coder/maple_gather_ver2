@@ -36,5 +36,5 @@ export function captureEnded(now=Date.now()){stopHunt(now,'화면 공유 종료'
 export function tick(now=Date.now()){
   if(idleHunt(state.hunt,now)){persist();state.collect.deadline=0;}
   const c=state.collect;
-  if(state.hunt.running&&c.deadline&&now>=c.deadline){notify('아이템을 회수하세요','alert','collect');c.deadline+= (Math.floor((now-c.deadline)/(c.sec*1000))+1)*c.sec*1000;}
+  if(state.hunt.running&&c.deadline&&now>=c.deadline){notify('회수하세요','alert','collect');c.deadline+= (Math.floor((now-c.deadline)/(c.sec*1000))+1)*c.sec*1000;}
 }

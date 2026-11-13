@@ -173,3 +173,48 @@ test('experience follows a game window offset inside a larger share',()=>{
  analyzeScreen(frame,[],1000);
  assert.equal(analyzeScreen(frame,[],1600).exp.value.raw,'38003778803410');
 });
+
+test('custom expiry survives scan misses until a fresh countdown is confirmed',()=>{
+ const tr={...freshState(),id:'job-1',deadline:1000,lastReadAt:500};
+ const miss={found:false,mode:'wait'};
+ advance(tr,miss,1200);
+ advance(tr,miss,4000);
+ assert.equal(tr.needsReinstall,true);
+ const hit={found:true,x:10,y:20,size:32,confidence:1,digit:'visible'};
+ advance(tr,{...hit,seconds:30},4250);
+ assert.equal(tr.needsReinstall,true);
+ advance(tr,{...hit,seconds:29},4750);
+ assert.equal(tr.needsReinstall,false);
+ assert.equal(tr.state,'active');
+});
+
+test('built-in installers retain expiry across search gaps and clear it on a new countdown',()=>{
+ for (const id of ['janus','fountain']) {
+   const tr={...freshState(),id,deadline:1000,alerted:true};
+   advance(tr,{found:false},1100);
+   advance(tr,{found:false},4000);
+   assert.equal(tr.needsReinstall,true);
+   const hit={found:true,x:10,y:20,size:32,confidence:1,digit:'visible'};
+   advance(tr,{...hit,seconds:30},4250);
+   advance(tr,{...hit,seconds:30},4750);
+   assert.equal(tr.needsReinstall,true);
+   advance(tr,{...hit,seconds:29},5250);
+   assert.equal(tr.needsReinstall,false);
+   assert.equal(tr.alerted,false);
+ }
+});
+
+test('custom timer OCR removes yellow pixels belonging to the skill art',()=>{
+ const size=32,background=new Uint8ClampedArray(size*size*4);
+ for(let i=3;i<background.length;i+=4)background[i]=255;
+ const yellow=[255,235,0,255];
+ for(let y=10;y<17;y++)background.set(yellow,(y*size+8)*4);
+ const overlay=background.slice();
+ const glyph=['01110','10001','10001','01110','10001','10001','01110'];
+ for(let y=0;y<glyph.length;y++)for(let x=0;x<5;x++){
+   if(glyph[y][x]==='1')overlay.set(yellow,((y+11)*size+x+14)*4);
+ }
+ assert.notEqual(readDigits(overlay,size).seconds,8);
+ assert.equal(readDigits(overlay,size,{background,min:1}).seconds,8);
+ assert.equal(readDigits(background,size,{background,min:1}).seconds,null);
+});

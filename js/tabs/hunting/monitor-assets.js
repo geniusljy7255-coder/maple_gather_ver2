@@ -1,14 +1,14 @@
 import {MONITOR_REFERENCE} from '../../data/monitor-reference.js';
 /* 배포용 기준 이미지는 자동 로드한다. 사용자 영역 지정/등록 UI는 없다. */
 let assets=[],missing=[];
-async function imageData(url){
+export async function imageData(url){
   const response=await fetch(url);if(!response.ok)throw new Error('missing');
   const image=await createImageBitmap(await response.blob());
   const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;
   const ctx=canvas.getContext('2d');ctx.drawImage(image,0,0);image.close();
   return ctx.getImageData(0,0,canvas.width,canvas.height);
 }
-function crop(img,x,y,w,h){const rgba=new Uint8ClampedArray(w*h*4);for(let row=0;row<h;row++)rgba.set(img.data.subarray(((y+row)*img.width+x)*4,((y+row)*img.width+x+w)*4),row*w*4);return{rgba,w,h};}
+export function crop(img,x,y,w,h){const rgba=new Uint8ClampedArray(w*h*4);for(let row=0;row<h;row++)rgba.set(img.data.subarray(((y+row)*img.width+x)*4,((y+row)*img.width+x+w)*4),row*w*4);return{rgba,w,h};}
 export async function loadMonitorAssets(){
   assets=[];missing=[];
   for(const [id,file] of [['rune_normal','rune-normal.png'],['rune_blessed','rune-blessed.png'],['rune_cooldown','rune-cooldown.png']]){

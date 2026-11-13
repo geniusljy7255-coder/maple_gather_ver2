@@ -6,7 +6,7 @@ import { analyzeScreen, resetScreenMonitor } from './screen-monitor.js';
 const SIZES = [32, 30, 34, 28, 36, 40, 24, 48, 64];
 let targets = [], generation = 0, dimensions = '', scanCursor = 0, localCursor = 0;
 let experienceBox = null;
-const isInstaller = target => target.id === "janus" || target.id === "fountain";
+const isInstaller = target => target.id === "janus" || target.id === "fountain" || target.id.startsWith("job-");
 const tpl = (img,whole=false) => makeTemplate(img.rgba, img.w, img.h,whole);
 
 function cropFrame(frame, x, y, w, h) {
@@ -104,6 +104,22 @@ self.onmessage = ({ data }) => {
       }
       return { id: t.id, ...r };
     });
+    for (const result of results) {
+      if (!result.id.startsWith('job-') || !result.found) continue;
+      const target = targets.find(item => item.id === result.id);
+      const background = target?.variants[target.locked]?.main.rgba;
+      if (!background) continue;
+      let reading;
+      for (const area of [[.08,.16,.92,.87],[.12,.32,.88,.73],[.06,.52,.94,.96]]) {
+        const options = {area,min:1,background};
+        reading = readDigits(result.preview,result.size,options);
+        if (reading.seconds !== null) break;
+        reading = readDigits(result.preview,result.size,{...options,light:true});
+        if (reading.seconds !== null) break;
+      }
+      // Keep a valid unmasked reading when the overlay shares the base art's color.
+      if (reading.seconds !== null || result.seconds === null) Object.assign(result,reading);
+    }
     const buffHits=results.filter(r=>r.found&&(r.id==='rune_normal'||r.id==='rune_blessed'));
     for(const r of results)if(r.id==='rune_cooldown'&&r.found){
       // 버프와 재사용 대기를 같은 좌표에서 동시에 인정하지 않는다.

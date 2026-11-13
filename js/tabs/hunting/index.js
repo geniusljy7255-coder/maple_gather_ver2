@@ -1,6 +1,6 @@
 /* 사냥 도우미 탭 */
 import { onTick } from '../../core/clock.js';
-import { html, bind, render } from './ui.js';
+import { html, bind, render, isPipOpen } from './ui.js';
 import { startDiag } from './diag.js';
 import { tick } from './session.js';
 import { initTracking } from './trackers.js';
@@ -14,7 +14,7 @@ function mount() {
   // 타이머 로직은 탭이 숨겨져 있어도 계속 돌고, 화면 갱신은 보일 때만 한다
   onTick(now => {
     tick(now);
-    if (visible) render(now);
+    if (visible || isPipOpen()) render(now);
   });
 }
 

@@ -1,6 +1,6 @@
 import {readScreenText,parseExperience} from './screen-text.js';
-let expBox=null,expPending=null,fragmentPending=null,lastRun=0,lastExpSuccess=0;
-export function resetScreenMonitor(){expBox=null;expPending=null;fragmentPending=null;lastRun=0;lastExpSuccess=0;}
+let expLower=null, expBox=null,expPending=null,fragmentPending=null,lastRun=0,lastExpSuccess=0;
+export function resetScreenMonitor(){expLower=null;expBox=null;expPending=null;fragmentPending=null;lastRun=0;lastExpSuccess=0;}
 function experience(F){
   // Start with a narrow band so unrelated HUD elements do not merge with the digits.
   const width = Math.ceil(F.w * .44);
@@ -61,11 +61,23 @@ export function analyzeScreen(F,results,now){
   const exp=experience(F);
   if(exp.value){
     const current=exp.value,previous=expPending;
-    expPending={...current,t:now};
     const previousRaw=previous?.raw?BigInt(previous.raw):null,nextRaw=BigInt(current.raw);
-    const stable=previousRaw!==null&&now-previous.t<=5000&&
-      (nextRaw>=previousRaw&&nextRaw-previousRaw<=previousRaw/100n+1000000000n ||
-       previous.level!=null&&current.level===previous.level+1);
+    const leveled = previous?.level != null && current.level === previous.level + 1;
+    let stable = previousRaw !== null && now-previous.t<=5000 &&
+      (nextRaw>=previousRaw && nextRaw-previousRaw<=previousRaw/100n+1000000000n || leveled);
+    if (previousRaw !== null && nextRaw < previousRaw && !leveled) {
+      // A momentary low OCR result must not turn a return to the true value into a gain.
+      const hits = expLower?.raw === current.raw && now-expLower.t < 2000 ? expLower.hits+1 : 1;
+      expLower = {raw:current.raw,t:now,hits};
+      if (hits >= 3) {
+        expPending = {...current,t:now};
+        expLower = null;
+        stable = true;
+      }
+    } else {
+      expLower = null;
+      expPending = {...current,t:now};
+    }
     exp.reason=stable?'경험치 숫자 확인됨':'경험치 숫자 연속 확인 중';
     if(!stable)exp.value=null;
     else { exp.previous=previous; lastExpSuccess=now; }
@@ -79,14 +91,16 @@ export function analyzeScreen(F,results,now){
     let reading;
     for (const [offset, height] of [[0,10],[1,7],[2,7],[3,7],[-1,8]]) {
       const band = {...box,y:box.y+offset*scale,h:height*scale};
-      reading = ['white','purple'].map(tone=>readScreenText(F,band,tone))
-        .find(result=>/^\d{1,6}$/.test(result.text)&&result.confidence>=.83);
+      reading = undefined;
+      for (const tone of ['white','dim','purple']) {
+        const result = readScreenText(F,band,tone);
+        if (/^\d{1,6}$/.test(result.text) && result.confidence>=.83) { reading = result; break; }
+      }
       if (reading) break;
     }
     if(reading){const count=Number(reading.text);const equal=fragmentPending?.value===count&&now-fragmentPending.t<2000;
       fragmentPending={value:count,t:now,hits:equal?fragmentPending.hits+1:1};
-      fragments={value:fragmentPending.hits>=3?count:null,text:reading.text,box};}
-    else fragmentPending=null;
-  }else fragmentPending=null;
+      fragments={value:fragmentPending.hits>=2?count:null,text:reading.text,box};}
+  }
   return {exp,fragments};
 }

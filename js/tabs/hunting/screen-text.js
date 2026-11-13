@@ -29,7 +29,7 @@ export function readScreenText(F,box,tone='white'){
   const bits=new Uint8Array(w*h),runs=[];
   for(let y=0;y<h;y++)for(let x=0;x<w;x++){
     const p=((y+y0)*F.w+x+x0)*4,r=F.rgba[p],g=F.rgba[p+1],b=F.rgba[p+2];
-    bits[y*w+x]=tone==='purple'?(r>135&&b>150&&g>65&&g<r*.95?1:0):Math.min(r,g,b)>155&&Math.max(r,g,b)-Math.min(r,g,b)<65?1:0;
+    bits[y*w+x]=tone==='purple'?(r>135&&b>150&&g>65&&g<r*.95?1:0):Math.min(r,g,b)>(tone==='dim'?125:155)&&Math.max(r,g,b)-Math.min(r,g,b)<65?1:0;
   }
   let start=null;
   for(let x=0;x<=w;x++){let count=0;if(x<w)for(let y=0;y<h;y++)count+=bits[y*w+x];

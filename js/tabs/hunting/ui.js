@@ -1,3 +1,4 @@
+import { jobInstallers, jobSkill, jobIconFile, installerIcon } from './job-installers.js';
 import {runePresentation} from './rune-state.js';
 /* 사냥 도우미: 화면 구성 · 이벤트 연결 · 렌더링 */
 import { $, setText } from '../../core/dom.js';
@@ -5,7 +6,7 @@ import { formatHMS, formatMS } from '../../core/format.js';
 import { unlockAudio, notify, getVoice, setVoice, getVoiceVolume, setVoiceVolume, ALARM_CHANNELS, isAlarmEnabled, setAlarmEnabled } from '../../core/notify.js';
 import { startCapture, stopCapture, getInfo, onCaptureChange } from './capture.js';
 import * as S from './session.js';
-import { installersHtml, renderInstallers } from './installers.js';
+import { installersHtml, renderInstallers, bindJobInstallers, iconLabel, installerPresentation } from './installers.js';
 
 const BTN_PRIMARY = 'rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-indigo-700';
 const BTN_DANGER = 'rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-red-700';
@@ -13,7 +14,7 @@ const BTN_GHOST = 'rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs
 const SURFACE = { window: '창', monitor: '전체 화면', browser: '브라우저 탭' };
 
 const dashCard = (label, valueHtml) => `
-  <div class="card text-center"><div class="label mb-1">${label}</div>${valueHtml}</div>`;
+  <div class="card text-center"><div class="label mb-1 flex min-h-6 items-center justify-center">${label}</div>${valueHtml}</div>`;
 
 export const html = `
 <div class="panel">
@@ -23,7 +24,11 @@ export const html = `
         <h2 class="text-sm font-bold">화면 공유</h2>
         <span id="huntShareChip" class="chip">공유 안 함</span>
       </div>
-      <button id="huntShareBtn" class="${BTN_PRIMARY}">화면 공유 시작</button>
+      <div class="flex flex-wrap gap-2">
+        <button id="huntShareBtn" class="${BTN_PRIMARY}">화면 공유 시작</button>
+        <button id="huntPipBtn" class="${BTN_GHOST}">PiP 모드</button>
+      </div>
+      <p id="huntPipStatus" class="hint" role="status"></p>
       <p id="huntShareInfo" class="hint break-words"></p>
       <p id="huntShareWarn" class="hidden text-xs text-amber-700"></p>
     </section>
@@ -51,8 +56,8 @@ export const html = `
     <div class="flex gap-2"><button id="huntToggle" class="${BTN_GHOST}">일시정지</button><button id="huntRestart" class="${BTN_PRIMARY}">다시 측정</button></div>
   </h2>
   <div class="grid grid-cols-2 gap-3">
-    ${dashCard('사냥 시간', '<div id="huntTime" class="text-3xl md:text-4xl font-black tabular-nums text-indigo-600">00:00:00</div>')}
-    ${dashCard('솔 에르다 조각', '<div id="huntFragments" class="text-2xl font-black text-indigo-600">—</div><div id="huntFragmentsDetail" class="hint"></div>')}
+    ${dashCard('사냥 시간', '<div id="huntTime" class="min-h-10 text-3xl leading-10 font-black tabular-nums text-indigo-600">00:00:00</div><div class="min-h-4" aria-hidden="true"></div>')}
+    ${dashCard(iconLabel('솔 에르다 조각',new URL('../../../icon/솔_에르다_조각.png',import.meta.url).href), '<div id="huntFragments" class="min-h-10 text-3xl leading-10 font-black tabular-nums text-indigo-600">—</div><div id="huntFragmentsDetail" class="hint min-h-4"></div>')}
   </div>
   <div class="card space-y-2">
     <div class="flex flex-wrap items-baseline justify-between gap-2">
@@ -101,10 +106,10 @@ export const html = `
 </div>
 
 <div class="panel">
-  <h2 class="panel-h"><span><span class="dot"></span>룬 · 설치기</span></h2>
-  <div class="grid gap-3 md:grid-cols-3">
+  <h2 class="panel-h"><span><span class="dot"></span>룬 · 설치기</span><button id="huntAddInstaller" class="${BTN_GHOST}">설치기 추가하기</button></h2>
+  <div id="huntInstallerGrid" class="grid gap-3 md:grid-cols-3">
     <div class="card space-y-2 text-center">
-      <div class="label">룬</div>
+      <div class="label">${iconLabel("룬",installerIcon("rune-normal"))}</div>
       <div id="runeState" class="text-sm font-bold">미니맵 탐색 중</div>
       <div id="runeRemaining" class="text-lg font-black text-indigo-600"></div>
     </div>
@@ -141,7 +146,143 @@ function renderShare() {
 }
 
 /* ---------- 이벤트 연결 ---------- */
+const pipFields = [
+  ['사냥 시간', 'huntTime'],
+  ['솔 에르다 조각', 'huntFragments', 'huntFragmentsDetail'],
+  ['획득 경험치', 'huntExp'],
+  ['아이템 회수', 'collectLeft'],
+  ['룬', 'runeState', 'runeRemaining'],
+  ['솔 야누스', 'trk-janus-state'],
+  ['에르다 파운틴', 'trk-fountain-state']
+];
+let pipWindow = null;
+let pipValues = [];
+let pipJobs = null;
+const pipIcons = {
+  collectLeft: new URL('../../../icon/메소.png',import.meta.url).href,
+  huntExp: new URL('../../../icon/경험치.png',import.meta.url).href,
+  huntFragments: new URL('../../../icon/솔_에르다_조각.png',import.meta.url).href,
+  runeState: installerIcon('rune-normal'),
+  'trk-janus-state': installerIcon('솔_야누스'),
+  'trk-fountain-state': installerIcon('에르다_파운틴')
+};
+const pipJobCards = new Map();
+export const isPipOpen = () => Boolean(pipWindow && !pipWindow.closed);
+
+function makePipCard(doc, label, icon, featured = false) {
+  const card = doc.createElement('div');
+  card.style.cssText = 'min-width:0;display:grid;align-content:center;gap:3px;padding:7px 8px;border-radius:10px;background:white;text-align:center';
+  if (featured) {
+    card.style.gridColumn = '1 / -1';
+    card.style.removeProperty('padding');
+    card.style.background = '#eef2ff';
+  }
+  const term = doc.createElement('dt');
+  term.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:5px;color:#475569;font-size:11px';
+  if (icon) {
+    const image = doc.createElement('img');
+    image.src = icon;
+    image.alt = '';
+    image.width = image.height = 16;
+    image.style.cssText = 'flex:none;border-radius:3px';
+    term.append(image);
+  }
+  const name = doc.createElement('span');
+  name.textContent = label;
+  term.append(name);
+  const value = doc.createElement('dd');
+  value.style.cssText = 'margin:0;font-weight:700;font-variant-numeric:tabular-nums;overflow-wrap:anywhere';
+  if (featured) value.style.cssText += ';font-size:26px;color:#4338ca';
+  card.append(term,value);
+  return {card,value};
+}
+
+function pipTimeColor(text, fallback = '#0f172a') {
+  const clock = text.match(/(?:^|\s)(\d+):(\d{2})(?![:\d])/);
+  const seconds = clock ? Number(clock[1])*60 + Number(clock[2]) : Number(text.match(/(\d+)초/)?.[1]);
+  if (/재설치|다시 설치/.test(text) || seconds <= 5) return '#b91c1c';
+  if (seconds <= 15) return '#a16207';
+  return Number.isFinite(seconds) ? '#047857' : fallback;
+}
+
+function renderPip(now) {
+  if (!isPipOpen()) return;
+  pipFields.forEach(([, ...ids], index) => {
+    const value = ids.map(id => $(id)?.textContent).filter(Boolean).join(' · ') || '—';
+    if (pipValues[index].textContent !== value) {
+      pipValues[index].textContent = value;
+      if (index >= 3) pipValues[index].style.color = pipTimeColor(value);
+    }
+  });
+  const entries = jobInstallers.filter(jobSkill);
+  for (const [id, entry] of pipJobCards) {
+    if (!entries.some(item => item.id === id && jobIconFile(item) === entry.file)) {
+      entry.card.remove();
+      pipJobCards.delete(id);
+    }
+  }
+  for (const item of entries) {
+    let entry = pipJobCards.get(item.id);
+    if (!entry) {
+      const file = jobIconFile(item);
+      entry = {...makePipCard(pipWindow.document,jobSkill(item).label,installerIcon(file)),file};
+      pipJobCards.set(item.id,entry);
+      pipJobs.append(entry.card);
+    }
+    const [label,color] = installerPresentation(item.id,now);
+    if (entry.value.textContent !== label) {
+      entry.value.textContent = label;
+      entry.value.style.color = pipTimeColor(label, color.includes('red') ? '#b91c1c' : color.includes('emerald') ? '#047857' : '#0f172a');
+    }
+  }
+}
+
+async function togglePip() {
+  if (isPipOpen()) { pipWindow.close(); return; }
+  const api = globalThis.documentPictureInPicture;
+  if (!api?.requestWindow) {
+    setText('huntPipStatus', '이 브라우저는 문서 PiP를 지원하지 않습니다.');
+    return;
+  }
+  const button = $('huntPipBtn');
+  button.disabled = true;
+  try {
+    const win = await api.requestWindow({width:360,height:310});
+    pipWindow = win;
+    const doc = win.document;
+    doc.title = '땅캐라 · 사냥 현황';
+    doc.documentElement.lang = 'ko';
+    doc.body.style.cssText = 'margin:0;padding:10px;background:#f1f5f9;color:#0f172a;font:13px system-ui,sans-serif';
+    const list = doc.createElement('dl');
+    list.style.cssText = 'display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin:0';
+    pipValues = pipFields.map(([label,id], index) => {
+      const {card,value} = makePipCard(doc,label,pipIcons[id],index===0);
+      list.append(card);
+      return value;
+    });
+    pipJobs = list;
+    doc.body.append(list);
+    win.addEventListener('pagehide', () => {
+      if (pipWindow !== win) return;
+      pipWindow = null;
+      pipValues = [];
+      pipJobs = null;
+      pipJobCards.clear();
+      button.textContent = 'PiP 모드';
+    }, {once:true});
+    button.textContent = 'PiP 닫기';
+    setText('huntPipStatus', '');
+    render(Date.now());
+  } catch {
+    setText('huntPipStatus', 'PiP 창을 열지 못했습니다.');
+  } finally {
+    button.disabled = false;
+  }
+}
+
 export function bind() {
+  bindJobInstallers();
+  $('huntPipBtn').addEventListener('click', togglePip);
   $('huntShareBtn').addEventListener('click', async () => {
     if (getInfo().active) { stopCapture(); return; }
     unlockAudio();
@@ -219,6 +360,7 @@ export function render(now) {
 
   renderShare();
   renderInstallers(now);
+  renderPip(now);
 }
 
 let historyKey='';
