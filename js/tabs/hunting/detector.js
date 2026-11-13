@@ -30,10 +30,17 @@ export function startDetector(cb) {
 export function configure(targets) { generation++; worker?.postMessage({ type: 'config', generation, targets }); }
 
 /** 프레임 한 장을 보낸다. 이전 분석이 끝나지 않았으면 건너뛰고 false를 돌려준다. */
+export function canAnalyze(now = Date.now()) {
+  return Boolean(worker) && (!busy || now - busySince >= 5000);
+}
+
 export function analyze(img, t) {
-  if (!worker) return false;
-  if (busy && Date.now() - busySince < 5000) return false;
+  if (!canAnalyze()) return false;
   busy = true; busySince = Date.now();
   worker.postMessage({ type: 'frame', generation, t, w: img.width, h: img.height, buffer: img.data.buffer }, [img.data.buffer]);
   return true;
+}
+
+export function requestInstallerPreview(id, enabled) {
+  worker?.postMessage({type:'installer-preview', id: enabled ? id : null});
 }

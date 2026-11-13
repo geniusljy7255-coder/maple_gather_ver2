@@ -63,8 +63,8 @@ test('installation early alert regression',()=>{
  for(let t=1000;t<5000;t+=250)advance(s,r(33-Math.floor((t-1000)/1000)),t);
  for(let t=5000;t<10000;t+=250)assert.equal(advance(s,r(null),t),false);
 });
-test('existing buff/slot matching across nine sizes remains intact',()=>{
- for(const [id,icons]of Object.entries(BUILTIN))for(const size of [24,28,30,32,34,36,40,48,64]){
+test('existing buff/slot matching across small and standard sizes remains intact',()=>{
+ for(const [id,icons]of Object.entries(BUILTIN))for(const size of [16,18,20,22,24,26,28,30,32,34,36,40,48,64]){
  const img=resizeIcon(icons.buff,size),slot=resizeIcon(icons.slot,size),W=128,H=96;
  const target={thr:.78,main:makeTemplate(img.rgba,size,size),reject:makeTemplate(slot.rgba,size,size),last:null};
  for(const [kind,icon]of [['buff',img],['slot',slot]]){const pixels=new Uint8ClampedArray(W*H*4);
@@ -217,4 +217,36 @@ test('custom timer OCR removes yellow pixels belonging to the skill art',()=>{
  assert.notEqual(readDigits(overlay,size).seconds,8);
  assert.equal(readDigits(overlay,size,{background,min:1}).seconds,8);
  assert.equal(readDigits(background,size,{background,min:1}).seconds,null);
+});
+
+test('confirmed installer deadline survives missed frames and reacquisition at a moved slot',()=>{
+ const tr={...freshState(),id:'janus',anchor:{x:10,y:20,size:32},deadline:31000,lastAt:1000};
+ assert.equal(advance(tr,{found:false},5000),false);
+ assert.equal(tr.deadline,31000);
+ assert.equal(tr.remaining,26);
+ const hit={found:true,x:50,y:20,size:32,confidence:1,digit:'visible'};
+ for (const [t,seconds] of [[5500,25],[6000,25],[6500,24]]) advance(tr,{...hit,seconds},t);
+ assert.equal(tr.state,'active');
+ assert.equal(tr.deadline,31000);
+});
+
+test('clear repeated custom timer readings start the countdown before the digit changes',()=>{
+ const tr={...freshState(),id:'job-1'};
+ const hit={found:true,x:10,y:20,size:32,confidence:.95,digit:'visible',seconds:30};
+ advance(tr,hit,1000);
+ assert.equal(tr.deadline,null);
+ advance(tr,hit,1500);
+ assert.equal(tr.remaining,30);
+ assert.equal(tr.state,'active');
+});
+
+test('center strip reads a two-digit timer below gold icon decoration',()=>{
+ const size=32, pixels=new Uint8ClampedArray(size*size*4), yellow=[255,235,0,255];
+ for(let x=4;x<28;x++)pixels.set(yellow,(7*size+x)*4);
+ const digits=[['00100','01100','00100','00100','00100','00100','01110'],
+ ['01110','10000','10000','11110','10001','10001','01110']];
+ digits.forEach((glyph,index)=>glyph.forEach((row,y)=>[...row].forEach((bit,x)=>{
+   if(bit==='1')pixels.set(yellow,((y+11)*size+10+index*6+x)*4);
+ })));
+ assert.equal(readDigits(pixels,size,{area:[.16,.31,.84,.69],min:1,aligned:true}).seconds,16);
 });

@@ -38,7 +38,7 @@ import { onTick } from '../../core/clock.js';
 import { notify } from '../../core/notify.js';
 import { getInfo, grabFrame, onCaptureChange } from './capture.js';
 import { TARGETS, getIcon, getThreshold, loadIcons, onIconsChange } from './icons.js';
-import { startDetector, configure, analyze } from './detector.js';
+import { startDetector, configure, analyze, canAnalyze, requestInstallerPreview } from './detector.js';
 
 import { freshState, advance } from './tracking-state.js';
 
@@ -46,6 +46,23 @@ import { freshState, advance } from './tracking-state.js';
 const fresh = t => ({ id: t.id, label: t.label, ...freshState(), last: null });
 export const trackers = Object.fromEntries(TARGETS.map(t => [t.id, fresh(t)]));
 export function resetTrackers() { [...TARGETS,...jobTargets].forEach(t => { trackers[t.id] = fresh(t); }); }
+
+let diagnostic = null;
+
+export function collectInstallerDiagnostic(id, duration = 6000) {
+  if (diagnostic) return Promise.reject(new Error('busy'));
+  if (!getInfo().active || !trackers[id]) return Promise.reject(new Error('unavailable'));
+  return new Promise(resolve => {
+    const samples = [];
+    diagnostic = {id, samples};
+    requestInstallerPreview(id, true);
+    setTimeout(() => {
+      requestInstallerPreview(id, false);
+      diagnostic = null;
+      resolve(samples);
+    }, duration);
+  });
+}
 
 export function handleResult(msg) {
   if (!getInfo().active) return;
@@ -55,6 +72,16 @@ export function handleResult(msg) {
     if (!tr) continue;
     tr.last = r;
     if (r.found) tr.lastSeen = msg.t;
+    if (diagnostic?.id === r.id && diagnostic.samples.length < 32) {
+      diagnostic.samples.push({
+        time:msg.t, found:r.found, mode:r.mode, score:r.score,
+        x:r.x, y:r.y, size:r.size, seconds:r.seconds ?? null,
+        confidence:r.confidence ?? null, digit:r.digit ?? null,
+        deadline:tr.deadline, candidates:tr.samples.slice(),
+        rgba:r.preview ? Array.from(r.preview) : null
+      });
+    }
+    delete r.preview;
     if (advance(tr, r, msg.t) && (tr.id === 'janus' || tr.id === 'fountain')) notify(tr.id === 'janus' ? '야누스 재설치' : '파운틴 재설치', 'alert', tr.id);
   }
 }
@@ -67,17 +94,21 @@ export function pushConfig() {
 }
 
 let lastGrab = 0;
+function submitFrame(now) {
+  if (!getInfo().active || now - lastGrab < 200 || !canAnalyze(now)) return;
+  const img = grabFrame();
+  if (img && analyze(img, now)) lastGrab = now;
+}
 export async function initTracking() {
-  startDetector(handleResult);
+  startDetector(result => {
+    handleResult(result);
+    submitFrame(Date.now());
+  });
   onIconsChange(pushConfig);
   onCaptureChange(info => { if(!info.active)captureEnded();resetTrackers();pushConfig(); });
   onJobInstallersChange(configureJobInstallers);
   await loadIcons();
   await configureJobInstallers();
   const assets=await loadMonitorAssets();extraTargets=assets.targets;sessionState.vision.assets=assets.missing;pushConfig();
-  onTick(now => {
-    if (!getInfo().active || now - lastGrab < 200) return;
-    const img = grabFrame();
-    if (img && analyze(img, now)) lastGrab = now;
-  });
+  onTick(submitFrame);
 }

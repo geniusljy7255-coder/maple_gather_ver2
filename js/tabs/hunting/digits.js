@@ -95,7 +95,7 @@ export function readDigits(rgba,size,options={}) {
   }
   const unknown={seconds:null,confidence:0,digit:count*(32/size)**2<=2?'absent':'uncertain'};
   if(!runs.length || runs.length>3) return unknown;
-  let text='', confidence=1;
+  let text='', confidence=1, firstBounds;
   for(const [left,right] of runs) {
     const w=right-left,bits=new Uint8Array(w*size);
     let top=size,bottom=-1;
@@ -103,6 +103,11 @@ export function readDigits(rgba,size,options={}) {
       bits[y*w+x-left]=1; top=Math.min(top,y);bottom=Math.max(bottom,y);
     }
     if(bottom-top+1<size*.18 || bottom-top+1>size*.55) return unknown;
+    if (options.aligned) {
+      const tolerance = Math.max(1, Math.round(size * .08));
+      if (firstBounds && (Math.abs(top-firstBounds.top)>tolerance || Math.abs(bottom-firstBounds.bottom)>tolerance)) return unknown;
+      firstBounds ??= {top,bottom};
+    }
     const glyph=normalize(bits,w,size),scores=Array(10).fill(0);
     for(const t of getTemplates()) {
       let intersection=0,total=0;

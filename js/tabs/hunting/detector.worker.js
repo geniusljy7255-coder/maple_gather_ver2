@@ -3,9 +3,10 @@ import { makeTemplate, prepareFrame, detect, resizeIcon } from './matcher.js';
 import { readDigits } from './digits.js';
 import { analyzeScreen, resetScreenMonitor } from './screen-monitor.js';
 
-const SIZES = [32, 30, 34, 28, 36, 40, 24, 48, 64];
+const SIZES = [32, 24, 28, 20, 26, 30, 22, 18, 16, 34, 36, 40, 48, 64];
 let targets = [], generation = 0, dimensions = '', scanCursor = 0, localCursor = 0;
 let experienceBox = null;
+let previewTarget = null;
 const isInstaller = target => target.id === "janus" || target.id === "fountain" || target.id.startsWith("job-");
 const tpl = (img,whole=false) => makeTemplate(img.rgba, img.w, img.h,whole);
 
@@ -22,6 +23,10 @@ const isBuff = target => target.id !== 'rune_marker' && target.id !== 'fragments
 
 self.onmessage = ({ data }) => {
   try {
+    if (data.type === 'installer-preview') {
+      previewTarget = data.id;
+      return;
+    }
     if (data.type === 'config') {
       generation = data.generation;
       targets = data.targets.map(t => ({
@@ -56,7 +61,7 @@ self.onmessage = ({ data }) => {
       : F.w;
     let area = localTarget ? cropFrame(F, left, top, right - left, bottom - top) : null;
     // Installed skill icons can appear beside the chat panel, below the buff list.
-    if (localTarget && isInstaller(localTarget) && !anchors.length && experienceBox) {
+    if (localTarget && isInstaller(localTarget) && !anchors.length && experienceBox?.y > 0) {
       const x = experienceBox.x;
       const y = Math.max(0, experienceBox.y - 180);
       area = cropFrame(F, x, y, Math.min(F.w - x, Math.ceil(F.w * .55)), experienceBox.y - y);
@@ -65,7 +70,7 @@ self.onmessage = ({ data }) => {
       let r;
       if (t.locked !== null) {
         const v = t.variants[t.locked];
-        r = detect(F, v, { allowScan: false });
+        r = detect(F, v, { allowScan: false, trackRadius: isInstaller(t) && t.misses ? 8 : 3 });
         if (r.found) { t.misses = 0; v.last = { x: r.x, y: r.y }; return { id: t.id, ...r }; }
         if (++t.misses < 3) return { id: t.id, ...r };
         v.last = null;
@@ -83,7 +88,10 @@ self.onmessage = ({ data }) => {
       }
       if (!r?.found && t === fullScanTarget) {
         index = t.cursor++ % t.variants.length;
-        r = detect(F, t.variants[index]);
+        const variant = t.variants[index];
+        r = detect(F, isInstaller(t) && variant.main.w <= 24
+          ? { ...variant, scanOptions: { coarseMin: .40, maxCands: 24 } }
+          : variant);
       }
       if (!r?.found && t !== fullScanTarget) {
         r = detect(F, t.variants[index], { allowScan: false });
@@ -109,8 +117,19 @@ self.onmessage = ({ data }) => {
       const target = targets.find(item => item.id === result.id);
       const background = target?.variants[target.locked]?.main.rgba;
       if (!background) continue;
-      let reading;
-      for (const area of [[.08,.16,.92,.87],[.12,.32,.88,.73],[.06,.52,.94,.96]]) {
+      // Prefer the centered countdown strip, above which some icons have
+      // a gold border. Try the strip without subtraction too: yellow art
+      // underneath a real digit can otherwise erase part of its stroke.
+      const center = [.16,.31,.84,.69];
+      let reading = readDigits(result.preview,result.size,{area:center,min:1,background,aligned:true});
+      if (reading.seconds === null) {
+        reading = readDigits(result.preview,result.size,{area:center,min:1,aligned:true});
+      }
+      if (reading.seconds !== null) {
+        Object.assign(result,reading);
+        continue;
+      }
+      for (const area of [[.08,.16,.92,.87],[.06,.29,.94,.72],[.06,.38,.94,.78],[.06,.52,.94,.96]]) {
         const options = {area,min:1,background};
         reading = readDigits(result.preview,result.size,options);
         if (reading.seconds !== null) break;
@@ -140,6 +159,7 @@ self.onmessage = ({ data }) => {
       }
       experienceBox = monitor.exp.box;
     }
+    for (const result of results) if (result.id !== previewTarget) delete result.preview;
     postMessage({ type: 'result', generation, t: data.t, ms: performance.now() - t0, results, monitor });
   } catch (e) {
     postMessage({ type: 'error', generation, message: String(e?.message || e) });

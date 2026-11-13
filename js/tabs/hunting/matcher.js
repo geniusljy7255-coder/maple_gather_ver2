@@ -244,7 +244,7 @@ export function scanMarker(F,t) {
 
 /** 한 대상 판정.
  *  target = { thr, main, reject? , last: {x,y}|null }  →  { found, score, x, y, yellow, mode, rejected } */
-export function detect(F, target, { allowScan = true } = {}) {
+export function detect(F, target, { allowScan = true, trackRadius = 3 } = {}) {
   const { main, reject, thr } = target;
   const accept = (c, need = thr) => {
     if (c.s < need) return false;
@@ -261,7 +261,7 @@ export function detect(F, target, { allowScan = true } = {}) {
   let best = { s: -1, x: 0, y: 0 }, mode = 'track', rejected = false;
 
   if (target.last) {
-    const c = trackNear(F, main, target.last.x, target.last.y);
+    const c = trackNear(F, main, target.last.x, target.last.y, trackRadius);
     best = c;
     // 이미 찾은 자리를 따라갈 때는 기준을 조금 낮춘다 (시간이 갈수록 아이콘이 흐려져서 점수가 떨어지기 때문)
     if (accept(c, thr - TRACK_SLACK)) return done(F, c, 'track', false, main);

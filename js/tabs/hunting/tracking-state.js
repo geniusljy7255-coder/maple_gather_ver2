@@ -12,7 +12,7 @@ export function advance(tr,r,now) {
   const same=tr.anchor && r.found && tr.anchor.size===r.size &&
     Math.abs(tr.anchor.x-r.x)<=r.size/4 && Math.abs(tr.anchor.y-r.y)<=r.size/4;
   if(gap || (r.found && tr.anchor && !same)) {
-    tr.samples=[];tr.deadline=null;tr.lastReadAt=0;tr.absentSince=null;
+    tr.samples=[];tr.lastReadAt=0;tr.absentSince=null;
   }
   if(r.found) tr.anchor={x:r.x,y:r.y,size:r.size};
   const valid=r.found && Number.isInteger(r.seconds) && r.seconds >= (custom ? 1 : 6) && r.confidence>=.83;
@@ -28,14 +28,21 @@ export function advance(tr,r,now) {
       Math.abs((s.t+s.n*1000)-(now+r.seconds*1000))<=1200);
     const predicted=tr.deadline===null?null:(tr.deadline-now)/1000;
     const consistent=predicted!==null && Math.abs(predicted-r.seconds)<=2;
-    const refreshed=predicted!==null && r.seconds>predicted+5 && decreased;
-    if(stable && ((predicted===null && decreased) || consistent || refreshed)) {
-      if(refreshed) tr.alerted=false;
-      if (r.seconds > 5 && decreased) {
+    const refreshed = predicted !== null && r.seconds > 5 &&
+      (predicted <= 0 || r.seconds > predicted + 5) && decreased;
+    // A clear repeated reading can seed a custom timer while the same
+    // displayed second is still on screen. Reinstallation needs a decrease.
+    const repeated = custom && predicted === null && r.confidence >= .9 &&
+      tr.samples.some(sample => sample.n === r.seconds &&
+        now - sample.t >= 250 && now - sample.t <= 950);
+    if (stable && (predicted === null || predicted > 0 || refreshed) && (consistent || decreased || repeated)) {
+      if (refreshed) {
         tr.needsReinstall = false;
         tr.alerted = false;
       }
-      if (!consistent || refreshed) tr.deadline=now+r.seconds*1000;
+      if (!consistent || refreshed || (decreased && Math.abs(predicted-r.seconds)>1)) {
+        tr.deadline = now+r.seconds*1000;
+      }
       tr.lastReadAt=now;tr.lastSeconds=r.seconds;accepted=true;
     }
   }
