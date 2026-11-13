@@ -1,0 +1,52 @@
+/* 확실한 감소 수열과 종료 근처 관측이 모두 있어야 알린다. */
+export const freshState = () => ({
+  state:'none', lastAt:0, anchor:null, samples:[], deadline:null,
+  lastReadAt:0, lastSeconds:null, remaining:null, absentSince:null,
+  alerted:false, reason:'남은 시간 자동 판독 대기'
+});
+export function advance(tr,r,now) {
+  const gap=tr.lastAt && now-tr.lastAt>2500;
+  tr.lastAt=now;
+  const same=tr.anchor && r.found && tr.anchor.size===r.size &&
+    Math.abs(tr.anchor.x-r.x)<=r.size/4 && Math.abs(tr.anchor.y-r.y)<=r.size/4;
+  if(gap || (r.found && tr.anchor && !same)) {
+    tr.samples=[];tr.deadline=null;tr.lastReadAt=0;tr.absentSince=null;
+  }
+  if(r.found) tr.anchor={x:r.x,y:r.y,size:r.size};
+  const valid=r.found && Number.isInteger(r.seconds) && r.seconds>=6 && r.confidence>=.83;
+  let accepted=false;
+  if(valid) {
+    tr.samples.push({n:r.seconds,t:now});
+    tr.samples=tr.samples.filter(s=>now-s.t<=4000).slice(-20);
+    const tail=tr.samples.slice(-3);
+    const stable=tail.length===3 &&
+      tail.every(s=>Math.abs((s.t+s.n*1000)-(now+r.seconds*1000))<=1200);
+    const decreased=tr.samples.some(s=>now-s.t>=1000 && s.n>r.seconds &&
+      Math.abs((s.t+s.n*1000)-(now+r.seconds*1000))<=1200);
+    const predicted=tr.deadline===null?null:(tr.deadline-now)/1000;
+    const consistent=predicted!==null && Math.abs(predicted-r.seconds)<=2;
+    const refreshed=predicted!==null && r.seconds>predicted+5 && decreased;
+    if(stable && ((predicted===null && decreased) || consistent || refreshed)) {
+      if(refreshed) tr.alerted=false;
+      if (!consistent || refreshed) tr.deadline=now+r.seconds*1000;
+      tr.lastReadAt=now;tr.lastSeconds=r.seconds;accepted=true;
+    }
+  }
+  tr.remaining=tr.deadline===null?null:Math.max(0,Math.ceil((tr.deadline-now)/1000));
+  const recent=now-tr.lastReadAt<= (r.found && same ? 4500 : 2500);
+  if(accepted) {tr.state='active';tr.reason='남은 숫자와 시간 흐름 확인';}
+  else if(tr.remaining>5 && recent) {tr.state='active';tr.reason='최근 판독 기준 추정 · 재확인 중';}
+  else {tr.state='unknown';tr.reason=r.found?'숫자 재확인 중 · 알림 보류':'아이콘 재탐색 중 · 알림 보류';}
+  const ending=r.found && same && r.digit==='absent' &&
+    tr.deadline!==null && tr.remaining<=5 && tr.remaining>0 &&
+    tr.lastSeconds<=10 && now-tr.lastReadAt<=6500 && !gap;
+  if(!ending) tr.absentSince=null;
+  else {
+    tr.absentSince??=now;
+    if(now-tr.absentSince>=1000) {
+      tr.state='expiring';tr.reason='종료 근처 시간과 숫자 사라짐 확인';
+      if(!tr.alerted) {tr.alerted=true;return true;}
+    }
+  }
+  return false;
+}

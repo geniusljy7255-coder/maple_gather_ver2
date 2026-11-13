@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍁</text></svg>">
+<title>땅캐라</title>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: { sans: ['Pretendard', 'system-ui', 'sans-serif'] },
+        screens: { md: '900px' }
+      }
+    }
+  }
+</script>
+<link rel="stylesheet" href="css/style.css">
+<!-- Tailwind CDN은 이 인라인 <style type="text/tailwindcss"> 안의 @apply만 처리합니다. 외부 css 파일로 옮기면 동작하지 않아요. -->
+<style type="text/tailwindcss">
+  @layer components {
+    .panel   { @apply rounded-2xl border border-slate-200 bg-slate-50/70 p-4 md:p-5 space-y-4; }
+    .panel-h { @apply flex items-center justify-between gap-3 text-sm font-bold text-slate-900; }
+    .panel-h .dot { @apply mr-2 inline-block h-2 w-2 rounded-full bg-indigo-500; }
+    .hint    { @apply text-xs font-normal text-slate-500; }
+    .card    { @apply rounded-xl border border-slate-200 bg-white p-3.5 transition; }
+    .sub-h   { @apply mb-2 block text-xs font-bold text-slate-500; }
+    .label   { @apply text-xs font-bold text-slate-700; }
+    .input   { @apply w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-right text-sm font-bold text-slate-900 transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500; }
+    .input.lg { @apply text-base; }
+    .kor     { @apply mt-1.5 text-right text-xs font-semibold text-indigo-600; }
+    .value   { @apply text-right text-base font-extrabold text-slate-900; }
+    .pos     { @apply text-red-600; }
+    .neg     { @apply text-blue-600; }
+    .tab-btn { @apply flex-1 border-b-2 border-transparent px-3 py-3 text-sm font-bold text-slate-500 transition hover:text-slate-800 md:text-base; }
+    .tab-btn[aria-selected="true"] { @apply border-indigo-600 bg-white text-indigo-600; }
+    .chip    { @apply whitespace-nowrap rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-xs font-bold text-slate-600; }
+    .row     { @apply flex items-center justify-between gap-2 rounded-lg border border-transparent p-2 transition hover:border-slate-200 hover:bg-slate-50; }
+    .cb      { @apply h-4 w-4 cursor-pointer rounded accent-indigo-600; }
+  }
+</style>
+</head>
+<body class="min-h-screen bg-slate-100 p-3 font-sans text-slate-800 sm:p-6">
+
+<div id="page">
+<header class="mx-auto max-w-5xl px-1 py-3">
+  <h1 class="text-4xl font-black tracking-tight text-slate-900">땅캐라</h1>
+</header>
+
+<nav class="mx-auto flex max-w-6xl overflow-hidden rounded-t-2xl border border-b-0 border-slate-200 bg-slate-100" id="tabNav" role="tablist"></nav>
+
+
+<!-- 왼쪽 슬라이드 패널: 시세 · 보유 수량 -->
+<div id="drawerBackdrop" class="fixed inset-0 z-30 hidden bg-black/30 md:hidden" onclick="toggleDrawer()"></div>
+<div id="drawerWrap" class="fixed left-0 top-0 z-40 h-full w-96 max-w-[85vw] transition-transform duration-300 ease-out">
+  <aside class="relative flex h-full w-full flex-col border-r border-slate-200 bg-slate-50 shadow-xl">
+    <div id="drawerScroll" class="no-scrollbar flex-1 space-y-4 overflow-y-auto p-4 pb-16">
+      <h2 class="text-sm font-bold text-slate-900">시세 · 보유 수량</h2>
+      <div id="drawerBody" class="space-y-4"></div>
+    </div>
+    <div id="drawerFade" class="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-slate-50 via-slate-50/80 to-transparent transition-opacity duration-200"></div>
+  </aside>
+  <button id="drawerToggle" onclick="toggleDrawer()"
+          class="absolute left-full top-1/2 -translate-y-1/2 rounded-r-xl bg-indigo-600 px-2 py-8 text-xs font-bold text-white shadow-lg transition-all duration-300 hover:bg-indigo-700 [writing-mode:vertical-rl]">접기</button>
+</div>
+
+<main id="tabPanels" class="mx-auto max-w-6xl rounded-b-2xl border border-slate-200 bg-white p-4 md:p-6">
+</main>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
