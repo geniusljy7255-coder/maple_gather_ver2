@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createHuntModel,beginHunt,finishHunt,observeExperience,observeFragments,idleHunt} from '../js/tabs/hunting/hunt-model.js';
+import {createHuntModel,beginHunt,finishHunt,observeExperience,observeFragments} from '../js/tabs/hunting/hunt-model.js';
 import {createRuneState,updateRune,cooldownSeconds,runePresentation} from '../js/tabs/hunting/rune-state.js';
 import {freshState,advance} from '../js/tabs/hunting/tracking-state.js';
 import {parseExperience} from '../js/tabs/hunting/screen-text.js';
@@ -8,10 +8,10 @@ import {readDigits} from '../js/tabs/hunting/digits.js';
 import {BUILTIN} from '../js/data/builtin-icons.js';
 import {makeTemplate,resizeIcon,prepareFrame,detect} from '../js/tabs/hunting/matcher.js';
 const exp=(percent,level=288)=>({percent,level,raw:String(Math.round(percent*1000000000))});
-test('automatic start, 30-second boundary, new session and retained history',()=>{
+test('automatic start, manual finish, new session and retained history',()=>{
  const m=createHuntModel();observeExperience(m,exp(28),1000);assert.equal(m.running,false);
  observeExperience(m,exp(28.1),2000);assert.equal(m.running,true);assert.equal(m.startExp.percent,28);
- assert.equal(idleHunt(m,31999),null);assert.ok(idleHunt(m,32000));assert.equal(m.history.length,1);
+ assert.ok(finishHunt(m,32000));assert.equal(m.history.length,1);
  observeExperience(m,exp(28.2),40000);assert.equal(m.startedAt,40000);assert.equal(m.startExp.percent,28.1);
  assert.equal(m.history.length,1);assert.ok(Math.abs(m.gainPercent-.1)<1e-8);
 });
@@ -107,7 +107,7 @@ test('raw experience increasing starts hunting even while rounded percentage is 
  observeExperience(m,{percent:28.693,raw:'38003778803411'},2000);
  assert.equal(m.running,true);assert.equal(m.startedAt,2000);assert.equal(m.gainPercent,0);
  observeExperience(m,{percent:28.693,raw:'38003778803412'},25000);
- assert.equal(idleHunt(m,32000),null);assert.ok(idleHunt(m,55000));
+ assert.equal(m.running,true);
 });
 
 test('percent changes alone do not start hunting; unreadable percent does not block raw increments',()=>{

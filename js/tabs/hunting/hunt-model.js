@@ -35,6 +35,7 @@ export function observeExperience(m,value,now){
     m.lastExp = copy(next);
     return false;
   }
+  if (m.running && !m.startExp) m.startExp=copy(next);
   const leveled=prev?.level!=null&&next.level===prev.level+1;
   const grew=!!prev && (BigInt(next.raw)>BigInt(prev.raw)||leveled);
   // 퍼센트는 기록용이며 시작/유지 판단에는 사용하지 않는다.
@@ -66,7 +67,4 @@ export function observeFragments(m,count) {
   m.fragmentStart ??= count;
   if(m.fragmentBaseline!==null && count>m.fragmentBaseline) m.fragments+=count-m.fragmentBaseline;
   m.fragmentBaseline=count;
-}
-export function idleHunt(m,now) {
-  return m.running && now-m.lastGainAt>=30000 ? finishHunt(m,m.lastGainAt+30000,'30초간 경험치 증가 없음') : null;
 }

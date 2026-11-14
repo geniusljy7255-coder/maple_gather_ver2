@@ -60,7 +60,7 @@ export function expireInstallers(now) {
       tracker.needsReinstall = true;
       tracker.recoveryUntil = now + 8000;
     }
-    if (now >= tracker.deadline - 1000 && !tracker.alerted) {
+    if (now >= tracker.deadline - 3000 && !tracker.alerted) {
       tracker.alerted = true;
       notifyInstaller(tracker.id);
     }

@@ -16,11 +16,13 @@ function confirm(samples,n,now,minutes=false){
 }
 export function updateRune(s,results,now){
   let alert=false;
-  const buffs=(results||[]).filter(r=>r.found&&r.identity!==false&&(r.id==='rune_normal'||r.id==='rune_blessed'));
+  const gray = (results||[]).find(r=>r.id==='rune_cooldown'&&r.found&&r.identity!==false&&r.chroma);
+  const buffs=(results||[]).filter(r=>r.found&&r.identity!==false&&
+    (r.id==='rune_normal'||r.id==='rune_blessed') &&
+    !(gray && Math.abs(gray.x-r.x)<gray.size*.5 && Math.abs(gray.y-r.y)<gray.size*.5));
   const timed = buffs.filter(r=>Number.isInteger(r.seconds)&&r.confidence>=.83&&r.seconds>0&&r.seconds<=900);
   const longest = timed.reduce((best,r)=>!best || r.seconds>best.seconds ? r : best,null);
-  const gray = (results||[]).find(r=>r.id==='rune_cooldown'&&r.found&&r.identity!==false&&r.chroma);
-  if (gray && s.buffAnchor && !longest && Math.abs(gray.x-s.buffAnchor.x)<gray.size*.5 &&
+  if (gray && s.buffAnchor && Math.abs(gray.x-s.buffAnchor.x)<gray.size*.5 &&
       Math.abs(gray.y-s.buffAnchor.y)<gray.size*.5) {
     s.buffSeen=0;s.buffDeadline=0;s.buffAnchor=null;s.buffSamples=[];
   }

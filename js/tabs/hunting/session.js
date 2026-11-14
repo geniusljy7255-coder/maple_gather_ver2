@@ -1,5 +1,5 @@
 import { notify } from '../../core/notify.js';
-import { createHuntModel, beginHunt, finishHunt, observeExperience, observeFragments, idleHunt } from './hunt-model.js';
+import { createHuntModel, beginHunt, finishHunt, observeExperience, observeFragments } from './hunt-model.js';
 import { createRuneState, updateRune } from './rune-state.js';
 const HISTORY_KEY='hunt_history_v1', LS_SEC='hunt_collect_sec', LS_ENABLED='hunt_collect_enabled';
 export const COLLECT_LIMITS={min:10,max:600,def:100};
@@ -66,8 +66,6 @@ export const collectLeftMs=(now=Date.now())=> !state.collect.enabled ? null : st
 export function handleMonitor(msg){
   if(msg.monitor){
     state.vision={...state.vision,...msg.monitor,lastAt:msg.t};
-    // 현재 프레임보다 오래된 사냥은 먼저 마감한다.
-    if(idleHunt(state.hunt,msg.t)){persist();state.collect.deadline=0;}
     const count=msg.monitor.fragments?.value;
     if (count != null) state.vision.fragmentsReadAt = msg.t;
     if (count!=null && state.hunt.latestFragments===null) {
@@ -78,9 +76,8 @@ export function handleMonitor(msg){
   }
   if(updateRune(state.rune,msg.results,msg.t))notify('룬이 나타났습니다','alert','rune');
 }
-export function captureEnded(now=Date.now()){stopHunt(now,'화면 공유 종료');state.hunt.lastExp=null;state.hunt.manuallyEnded=false;state.hunt.latestFragments=null;state.vision.lastAt=0;state.vision.fragmentsReadAt=0;}
+export function captureEnded(){state.hunt.lastExp=null;state.hunt.fragmentBaseline=null;state.hunt.latestFragments=null;state.rune=createRuneState();state.vision.lastAt=0;state.vision.fragmentsReadAt=0;}
 export function tick(now=Date.now()){
-  if(idleHunt(state.hunt,now)){persist();state.collect.deadline=0;}
   const c=state.collect;
   if(c.enabled&&state.hunt.running&&c.deadline&&now>=c.deadline){notify('회수하세요','alert','collect');c.deadline+= (Math.floor((now-c.deadline)/(c.sec*1000))+1)*c.sec*1000;}
 }

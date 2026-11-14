@@ -251,7 +251,7 @@ export function detect(F, target, { allowScan = true, trackRadius = 3 } = {}) {
     if (c.s < need) return false;
     if (target.colorMode) {
       c.chroma = iconChroma(F, main, c.x, c.y);
-      const coloredRune = c.chroma.blue >= .30;
+      const coloredRune = c.chroma.blue >= .30 && c.chroma.mean >= .14;
       if ((target.colorMode === 'color') !== coloredRune) return false;
     }
     c.color = colorSimilarity(F, main, c.x, c.y);
@@ -283,9 +283,13 @@ export function detect(F, target, { allowScan = true, trackRadius = 3 } = {}) {
 export function iconChroma(F,t,x,y){
   let sum=0,colored=0,blue=0,count=0;
   for(let i=0;i<t.full.n;i++){
-    const p=((y+t.full.dy[i])*F.w+x+t.full.dx[i])*4;
+    const dx=t.full.dx[i],dy=t.full.dy[i];
+    if (dx<t.w*.08 || dx>=t.w*.92 || dy<t.h*.08 || dy>=t.h*.92) continue;
+    const p=((y+dy)*F.w+x+dx)*4;
     const r=F.rgba[p],g=F.rgba[p+1],b=F.rgba[p+2],max=Math.max(r,g,b),min=Math.min(r,g,b);
-    if(max<65)continue;const saturation=(max-min)/max;
+    // Exclude bright yellow countdown strokes from the classification.
+    if (max<65 || (r>140 && g>115 && Math.min(r,g)-b>65)) continue;
+    const saturation=(max-min)/max;
     sum+=saturation;count++;if(saturation>.25)colored++;
     // Rune artwork is blue or violet. Yellow countdown strokes carry no identity.
     if (b > r + 20 && (b > g + 14 || g > r + 25)) blue++;

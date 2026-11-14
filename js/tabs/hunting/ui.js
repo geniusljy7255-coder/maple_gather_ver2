@@ -11,6 +11,7 @@ import { installersHtml, renderInstallers, bindJobInstallers, iconLabel, install
 const BTN_PRIMARY = 'rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-indigo-700';
 const BTN_DANGER = 'rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-red-700';
 const BTN_GHOST = 'rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-100';
+const HUNT_BUTTON_SIZE = 'inline-size:6rem;block-size:2.25rem;padding:0;font-size:.75rem;white-space:nowrap';
 const SURFACE = { window: '창', monitor: '전체 화면', browser: '브라우저 탭' };
 
 const dashCard = (label, valueHtml) => `
@@ -53,7 +54,7 @@ export const html = `
 <div class="panel">
   <h2 class="panel-h">
     <span><span class="dot"></span>사냥 현황</span>
-    <div class="flex flex-wrap justify-end gap-2"><button id="huntToggle" class="${BTN_GHOST}">일시정지</button><button id="huntRestart" class="${BTN_PRIMARY}">다시 측정</button><button id="huntStop" class="${BTN_GHOST}">측정 종료</button></div>
+    <div class="flex flex-wrap justify-end gap-2"><button type="button" style="${HUNT_BUTTON_SIZE}" id="huntStart" class="${BTN_PRIMARY}">측정 시작</button><button type="button" style="${HUNT_BUTTON_SIZE}" id="huntToggle" class="${BTN_DANGER}">일시정지</button><button type="button" style="${HUNT_BUTTON_SIZE}" id="huntRestart" class="${BTN_PRIMARY}">다시 측정</button><button type="button" style="${HUNT_BUTTON_SIZE}" id="huntStop" class="${BTN_GHOST}">측정 종료</button></div>
   </h2>
   <div class="grid grid-cols-2 gap-3">
     ${dashCard('사냥 시간', '<div id="huntTime" class="min-h-10 text-3xl leading-10 font-black tabular-nums text-indigo-600">00:00:00</div><div class="min-h-4" aria-hidden="true"></div>')}
@@ -161,6 +162,7 @@ const pipFields = [
 let pipWindow = null;
 let pipValues = [];
 let pipStrip = null;
+let pipControls = [];
 let pipJobKey = '';
 const pipIcons = {
   collectLeft: new URL('../../../icon/메소.png',import.meta.url).href,
@@ -172,6 +174,36 @@ const pipIcons = {
 };
 const pipJobCards = new Map();
 export const isPipOpen = () => Boolean(pipWindow && !pipWindow.closed);
+
+const huntButtonIds = ['huntStart','huntToggle','huntRestart','huntStop'];
+const huntActions = [
+  () => S.startHunt(),
+  () => S.state.hunt.pausedAt !== null ? S.resumeHunt() : S.pauseHunt(),
+  () => S.startHunt(),
+  () => S.endHunt()
+].map(action => () => { unlockAudio(); action(); render(Date.now()); });
+
+function syncHuntControls(buttons) {
+  const paused = S.state.hunt.pausedAt !== null;
+  const started = S.state.hunt.running || paused;
+  const labels = ['측정 시작',paused ? '이어서 측정' : '일시정지','다시 측정','측정 종료'];
+  buttons.forEach((button,index) => {
+    const display = (index === 0 ? !started : started) ? '' : 'none';
+    if (button.style.display !== display) button.style.display = display;
+    if (button.textContent !== labels[index]) button.textContent = labels[index];
+  });
+}
+
+function newHuntButtons(doc,container) {
+  return huntActions.map((action,index) => {
+    const button = doc.createElement('button');
+    button.type = 'button';
+    button.className = index === 1 ? 'pip-pause' : index === 3 ? '' : 'pip-primary';
+    button.addEventListener('click',action);
+    container.append(button);
+    return button;
+  });
+}
 
 function makePipCard(doc, label, icon, featured = false) {
   const card = doc.createElement('div');
@@ -197,7 +229,7 @@ function makePipCard(doc, label, icon, featured = false) {
 function makePipColumn(doc, featured = false) {
   const column = doc.createElement('div');
   column.style.cssText = 'flex:1 0 auto;display:grid;grid-template-rows:repeat(2,24px);min-width:82px;align-content:center;padding:0 10px;border-right:1px solid #dbe3ef';
-  if (featured) column.style.cssText += ';grid-template-rows:48px';
+  if (featured) column.style.cssText += ';grid-template-rows:auto auto;min-width:158px';
   return column;
 }
 
@@ -241,6 +273,7 @@ function renderPip(now) {
       if (index >= 3) pipValues[index].style.color = pipTimeColor(value);
     }
   });
+  syncHuntControls(pipControls);
   const entries = jobInstallers.filter(jobSkill);
   const jobKey = JSON.stringify(entries.map(item => [item.id,jobIconFile(item)]));
   if (jobKey !== pipJobKey) {
@@ -281,8 +314,8 @@ async function togglePip() {
   button.disabled = true;
   try {
     const jobColumns = Math.ceil(jobInstallers.filter(jobSkill).length / 2);
-    const width = Math.min(505 + jobColumns * 106, globalThis.screen?.availWidth || 1000);
-    const win = await api.requestWindow({width,height:95});
+    const width = Math.min(565 + jobColumns * 106, globalThis.screen?.availWidth || 1000);
+    const win = await api.requestWindow({width,height:105});
     pipWindow = win;
     const doc = win.document;
     doc.title = '땅캐라 · 사냥 현황';
@@ -292,7 +325,20 @@ async function togglePip() {
     pipStrip.className = 'pip-strip';
     pipStrip.style.cssText = 'display:flex;flex:1;min-width:0;overflow-x:auto;align-self:stretch';
     const style = doc.createElement('style');
-    style.textContent = '.pip-strip > div > div + div {border-top:1px solid #e2e8f0} .pip-close:hover {background:#e2e8f0;color:#0f172a}';
+    style.textContent = `
+      .pip-strip > div > div + div { border-top: 1px solid #e2e8f0; }
+      .pip-close:hover { background: #e2e8f0; color: #0f172a; }
+      .pip-hunt-controls { display: flex; }
+      .pip-hunt-controls button {
+        flex: 1 0 0; min-width: 0; height: 24px; padding: 0 3px;
+        border: 0; background: transparent; color: #334155;
+        font: 600 10px system-ui; white-space: nowrap; cursor: pointer;
+      }
+      .pip-hunt-controls button:nth-child(n+3) { border-left: 1px solid #e2e8f0; }
+      .pip-hunt-controls button.pip-pause { color: #b91c1c; }
+      .pip-hunt-controls button.pip-primary { color: #4338ca; }
+      .pip-hunt-controls button:hover { background: #f1f5f9; }
+    `;
     doc.head.append(style);
     let column;
     pipValues = pipFields.map(([label,id], index) => {
@@ -304,6 +350,10 @@ async function togglePip() {
       column.append(card);
       return value;
     });
+    const controls = doc.createElement('div');
+    controls.className = 'pip-hunt-controls';
+    pipControls = newHuntButtons(doc,controls);
+    pipStrip.firstElementChild.append(controls);
     const panel = doc.createElement('div');
     panel.style.cssText = 'display:flex;align-items:center;background:#fff;border:1px solid #dbe3ef;border-radius:10px;padding:5px 0';
     const close = doc.createElement('button');
@@ -321,6 +371,7 @@ async function togglePip() {
       pipWindow = null;
       pipValues = [];
       pipStrip = null;
+      pipControls = [];
       pipJobKey = '';
       pipJobCards.clear();
       button.textContent = 'PiP 모드';
@@ -382,15 +433,9 @@ export function bind() {
   }
   $('huntTestSound').addEventListener('click', () => notify('알림 테스트입니다', 'alert'));
 
-  $('huntToggle').addEventListener('click', () => {
-    unlockAudio();
-    if (S.state.hunt.pausedAt !== null) S.resumeHunt();
-    else S.pauseHunt();
-    render(Date.now());
-  });
-
-  $('huntStop').addEventListener('click', () => { S.endHunt(); render(Date.now()); });
-  $('huntRestart').addEventListener('click', () => { unlockAudio(); S.startHunt(); render(Date.now()); });
+  for (const [index,id] of huntButtonIds.entries()) {
+    $(id).addEventListener('click',huntActions[index]);
+  }
 
   $('collectEnabled').checked = S.state.collect.enabled;
   $('collectEnabled').addEventListener('change', event => {
@@ -407,14 +452,8 @@ export function bind() {
 
 /* ---------- 렌더링 (탭이 보일 때 0.25초마다) ---------- */
 export function render(now) {
-  const running = S.state.hunt.running;
   setText('huntTime', formatHMS(S.huntMs(now)));
-  const paused = S.state.hunt.pausedAt !== null;
-  setText('huntToggle', paused ? '이어서 측정' : running ? '일시정지' : S.state.hunt.manuallyEnded ? '측정 종료됨' : '자동 시작 대기');
-  $('huntToggle').disabled=!running && !paused;
-  $('huntStop').disabled=!running && !paused;
-  $('huntRestart').disabled=!S.state.hunt.lastExp;
-  $('huntToggle').className = `${running ? BTN_DANGER : BTN_PRIMARY} !py-1.5`;
+  syncHuntControls(huntButtonIds.map(id=>$(id)));
 
   const left = S.collectLeftMs(now), total = S.state.collect.sec * 1000;
   setText('collectLeft', !S.state.collect.enabled ? '꺼짐' : left === null ? '--:--' : formatMS(left));
@@ -435,7 +474,7 @@ const percent=value=>value==null?'미확인':Number(value).toFixed(4)+'%';
 function renderMeasurements(now){
   const h=S.state.hunt,r=S.state.rune,v=S.state.vision,sharing=getInfo().active;
   const measureReason=(h.running||h.manuallyEnded)?h.reason:v.exp?.value?.raw?h.reason:(v.exp?.reason||'경험치 숫자 인식 대기');
-  setText('huntMeasureState',h.manuallyEnded ? '측정 종료 · 다시 측정 버튼으로 시작' : measureReason+' · 실제 경험치 숫자 증가로 시작 · 30초간 증가가 없으면 마감');
+  setText('huntMeasureState',h.manuallyEnded ? '측정 종료 · 측정 시작 버튼으로 시작' : measureReason+' · 실제 경험치 숫자 증가로 시작');
   const lastPercent = h.percentAnchor?.percent ?? h.lastExp?.percent;
   const gainedPercent = Number.isFinite(h.startExp?.percent) && Number.isFinite(lastPercent);
   setText('huntExp', h.startExp

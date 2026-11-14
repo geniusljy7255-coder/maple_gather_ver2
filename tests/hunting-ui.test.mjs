@@ -83,17 +83,20 @@ test('overlapping announcements play in order and recover from a speech error',(
 
 test('manual end saves the hunt and keeps collection stopped until restart',()=>{
  S.startHunt(250000);
- S.endHunt(251000);
+ S.tick(281000);
+ assert.equal(S.state.hunt.running,true);
+ S.endHunt(282000);
  const records=S.state.hunt.history.length;
  const raw=String(BigInt(S.state.hunt.lastExp.raw)+1n);
- S.handleMonitor({t:252000,results:[],monitor:{exp:{value:{raw,percent:null}}}});
+ S.handleMonitor({t:283000,results:[],monitor:{exp:{value:{raw,percent:null}}}});
  assert.equal(S.state.hunt.running,false);
  assert.equal(S.state.hunt.history.length,records);
  assert.equal(S.state.collect.deadline,0);
- S.startHunt(253000);
+ S.startHunt(284000);
  assert.equal(S.state.hunt.running,true);
  assert.equal(S.state.hunt.startExp.raw,raw);
- S.captureEnded(254000);
+ S.endHunt(285000);
+ S.captureEnded(286000);
 });
 test('a confirmed first fragment increase preserves the earlier starting count',()=>{
  S.captureEnded(300000);
@@ -102,7 +105,8 @@ test('a confirmed first fragment increase preserves the earlier starting count',
  assert.equal(S.state.hunt.fragmentStart,23);
  assert.equal(S.state.hunt.latestFragments,24);
  assert.equal(S.state.hunt.fragments,1);
- S.captureEnded(303000);
+ S.endHunt(303000);
+ S.captureEnded(304000);
 });
 test('confirmed installer expires and notifies once without further frame results',async()=>{
  const {trackers,expireInstallers}=await import('../js/tabs/hunting/trackers.js');
@@ -111,9 +115,9 @@ test('confirmed installer expires and notifies once without further frame result
  try {
    N.setAlarmEnabled('janus',true);
    Object.assign(trackers.janus,{deadline:3000,needsReinstall:false,alerted:false});
-   expireInstallers(1999);
+   expireInstallers(-1);
    assert.equal(events.filter(e=>e.channel==='janus').length,0);
-   expireInstallers(2000);
+   expireInstallers(0);
    assert.equal(events.filter(e=>e.channel==='janus').length,1);
    assert.equal(trackers.janus.needsReinstall,false);
    expireInstallers(2999);
