@@ -4,6 +4,9 @@ export const freshState = () => ({
   lastReadAt:0, lastSeconds:null, remaining:null, absentSince:null,
   alerted:false, needsReinstall:false, reason:'남은 시간 자동 판독 대기'
 });
+function predictedSampleCount(custom, deadline) {
+  return custom || deadline === null ? 2 : 3;
+}
 export function advance(tr,r,now) {
   const custom = tr.id?.startsWith('job-');
   if (tr.deadline !== null && now >= tr.deadline) tr.needsReinstall = true;
@@ -20,11 +23,11 @@ export function advance(tr,r,now) {
   if(valid) {
     tr.samples.push({n:r.seconds,t:now});
     tr.samples=tr.samples.filter(s=>now-s.t<=4000).slice(-20);
-    const required = custom ? 2 : 3;
+    const required = predictedSampleCount(custom, tr.deadline);
     const tail=tr.samples.slice(-required);
     const stable=tail.length===required &&
       tail.every(s=>Math.abs((s.t+s.n*1000)-(now+r.seconds*1000))<=1200);
-    const decreased=tr.samples.some(s=>now-s.t >= (custom ? 250 : 1000) && s.n>r.seconds &&
+    const decreased=tr.samples.some(s=>now-s.t >= (custom || tr.deadline === null ? 250 : 1000) && s.n>r.seconds &&
       Math.abs((s.t+s.n*1000)-(now+r.seconds*1000))<=1200);
     const predicted=tr.deadline===null?null:(tr.deadline-now)/1000;
     const consistent=predicted!==null && Math.abs(predicted-r.seconds)<=2;
@@ -63,7 +66,6 @@ export function advance(tr,r,now) {
     tr.absentSince??=now;
     if(now-tr.absentSince>=1000) {
       tr.state='expiring';tr.reason='종료 근처 시간과 숫자 사라짐 확인';
-      if(!tr.alerted) {tr.alerted=true;return true;}
     }
   }
   return false;

@@ -34,13 +34,9 @@ export function canAnalyze(now = Date.now()) {
   return Boolean(worker) && (!busy || now - busySince >= 5000);
 }
 
-export function analyze(img, t) {
+export function analyze(img, t, targetIds = null) {
   if (!canAnalyze()) return false;
   busy = true; busySince = Date.now();
-  worker.postMessage({ type: 'frame', generation, t, w: img.width, h: img.height, buffer: img.data.buffer }, [img.data.buffer]);
+  worker.postMessage({ type: 'frame', generation, t, targetIds, w: img.width, h: img.height, buffer: img.data.buffer }, [img.data.buffer]);
   return true;
-}
-
-export function requestInstallerPreview(id, enabled) {
-  worker?.postMessage({type:'installer-preview', id: enabled ? id : null});
 }

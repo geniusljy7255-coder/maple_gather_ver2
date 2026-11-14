@@ -53,7 +53,7 @@ export const html = `
 <div class="panel">
   <h2 class="panel-h">
     <span><span class="dot"></span>사냥 현황</span>
-    <div class="flex gap-2"><button id="huntToggle" class="${BTN_GHOST}">일시정지</button><button id="huntRestart" class="${BTN_PRIMARY}">다시 측정</button></div>
+    <div class="flex flex-wrap justify-end gap-2"><button id="huntToggle" class="${BTN_GHOST}">일시정지</button><button id="huntRestart" class="${BTN_PRIMARY}">다시 측정</button><button id="huntStop" class="${BTN_GHOST}">측정 종료</button></div>
   </h2>
   <div class="grid grid-cols-2 gap-3">
     ${dashCard('사냥 시간', '<div id="huntTime" class="min-h-10 text-3xl leading-10 font-black tabular-nums text-indigo-600">00:00:00</div><div class="min-h-4" aria-hidden="true"></div>')}
@@ -95,7 +95,10 @@ export const html = `
       <div class="mt-2 h-2 overflow-hidden rounded-full bg-slate-200"><div id="collectBar" class="h-full w-0 bg-indigo-500"></div></div>
     </div>
     <div class="card space-y-2">
-      <label class="label block" for="collectSec">알림 시간 (초)</label>
+      <div class="flex items-center justify-between gap-2">
+        <label class="label" for="collectSec">알림 시간 (초)</label>
+        <label class="flex shrink-0 items-center gap-1 text-xs"><input id="collectEnabled" type="checkbox" class="cb">타이머 사용</label>
+      </div>
       <div class="flex items-center gap-2">
         <input type="number" id="collectSec" min="10" max="600" class="input !h-9 w-full min-w-0 flex-1 !py-0">
         <button id="collectReset" class="${BTN_GHOST} !h-9 !py-0 shrink-0 whitespace-nowrap">회수 완료</button>
@@ -148,16 +151,17 @@ function renderShare() {
 /* ---------- 이벤트 연결 ---------- */
 const pipFields = [
   ['사냥 시간', 'huntTime'],
-  ['솔 에르다 조각', 'huntFragments', 'huntFragmentsDetail'],
   ['획득 경험치', 'huntExp'],
+  ['솔 에르다 조각', 'huntFragments'],
   ['아이템 회수', 'collectLeft'],
-  ['룬', 'runeState', 'runeRemaining'],
+  ['룬', 'runeState'],
   ['솔 야누스', 'trk-janus-state'],
   ['에르다 파운틴', 'trk-fountain-state']
 ];
 let pipWindow = null;
 let pipValues = [];
-let pipJobs = null;
+let pipStrip = null;
+let pipJobKey = '';
 const pipIcons = {
   collectLeft: new URL('../../../icon/메소.png',import.meta.url).href,
   huntExp: new URL('../../../icon/경험치.png',import.meta.url).href,
@@ -171,30 +175,30 @@ export const isPipOpen = () => Boolean(pipWindow && !pipWindow.closed);
 
 function makePipCard(doc, label, icon, featured = false) {
   const card = doc.createElement('div');
-  card.style.cssText = 'min-width:0;display:grid;align-content:center;gap:3px;padding:7px 8px;border-radius:10px;background:white;text-align:center';
-  if (featured) {
-    card.style.gridColumn = '1 / -1';
-    card.style.removeProperty('padding');
-    card.style.background = '#eef2ff';
-  }
-  const term = doc.createElement('dt');
-  term.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:5px;color:#475569;font-size:11px';
+  card.style.cssText = 'display:flex;align-items:center;gap:6px;min-width:0;min-height:22px;box-sizing:border-box';
+  card.setAttribute('aria-label',label);
+  card.title = label;
+  if (featured) card.style.cssText += ';justify-content:center;height:100%';
   if (icon) {
     const image = doc.createElement('img');
     image.src = icon;
     image.alt = '';
     image.width = image.height = 16;
     image.style.cssText = 'flex:none;border-radius:3px';
-    term.append(image);
+    card.append(image);
   }
-  const name = doc.createElement('span');
-  name.textContent = label;
-  term.append(name);
-  const value = doc.createElement('dd');
-  value.style.cssText = 'margin:0;font-weight:700;font-variant-numeric:tabular-nums;overflow-wrap:anywhere';
-  if (featured) value.style.cssText += ';font-size:26px;color:#4338ca';
-  card.append(term,value);
+  const value = doc.createElement('span');
+  value.style.cssText = 'font-weight:700;font-variant-numeric:tabular-nums;overflow-wrap:anywhere';
+  if (featured) value.style.cssText += ';font-size:22px;color:#4338ca;white-space:nowrap';
+  card.append(value);
   return {card,value};
+}
+
+function makePipColumn(doc, featured = false) {
+  const column = doc.createElement('div');
+  column.style.cssText = 'flex:1 0 auto;display:grid;grid-template-rows:repeat(2,24px);min-width:82px;align-content:center;padding:0 10px;border-right:1px solid #dbe3ef';
+  if (featured) column.style.cssText += ';grid-template-rows:48px';
+  return column;
 }
 
 function pipTimeColor(text, fallback = '#0f172a') {
@@ -205,33 +209,62 @@ function pipTimeColor(text, fallback = '#0f172a') {
   return Number.isFinite(seconds) ? '#047857' : fallback;
 }
 
+function compactPipInstaller(text) {
+  return text?.match(/\d+초/)?.[0] ?? (text?.includes('다시 설치') ? '재설치' : '—');
+}
+
+function compactPipRune(now) {
+  if (!getInfo().active) return '—';
+  const rune = runePresentation(S.state.rune,now);
+  if (rune.seconds !== null) {
+    const time = formatMS(rune.seconds*1000);
+    return rune.label === '룬 재사용 대기' ? '대기 '+time : time;
+  }
+  if (rune.label === '룬이 나타났습니다') return '출현';
+  return rune.label === '룬 재사용 대기' ? '대기' : '탐색';
+}
+
 function renderPip(now) {
   if (!isPipOpen()) return;
-  pipFields.forEach(([, ...ids], index) => {
-    const value = ids.map(id => $(id)?.textContent).filter(Boolean).join(' · ') || '—';
+  pipFields.forEach(([, id], index) => {
+    const hunt = S.state.hunt;
+    const value = id === 'huntExp'
+      ? (Number.isFinite(hunt.startExp?.percent) && Number.isFinite(hunt.percentAnchor?.percent)
+        ? '+'+hunt.gainPercent.toFixed(4)+'%p' : '— %p')
+      : id === 'runeState'
+        ? compactPipRune(now)
+        : id.startsWith('trk-')
+          ? compactPipInstaller($(id)?.textContent)
+          : $(id)?.textContent || '—';
     if (pipValues[index].textContent !== value) {
       pipValues[index].textContent = value;
       if (index >= 3) pipValues[index].style.color = pipTimeColor(value);
     }
   });
   const entries = jobInstallers.filter(jobSkill);
-  for (const [id, entry] of pipJobCards) {
-    if (!entries.some(item => item.id === id && jobIconFile(item) === entry.file)) {
-      entry.card.remove();
-      pipJobCards.delete(id);
-    }
+  const jobKey = JSON.stringify(entries.map(item => [item.id,jobIconFile(item)]));
+  if (jobKey !== pipJobKey) {
+    pipJobKey = jobKey;
+    while (pipStrip.children.length > 4) pipStrip.lastElementChild.remove();
+    pipJobCards.clear();
+    const doc = pipWindow.document;
+    let column;
+    entries.forEach((item,index) => {
+      if (index % 2 === 0) {
+        column = makePipColumn(doc);
+        pipStrip.append(column);
+      }
+      const entry = makePipCard(doc,jobSkill(item).label,installerIcon(jobIconFile(item)));
+      pipJobCards.set(item.id,entry);
+      column.append(entry.card);
+    });
   }
   for (const item of entries) {
-    let entry = pipJobCards.get(item.id);
-    if (!entry) {
-      const file = jobIconFile(item);
-      entry = {...makePipCard(pipWindow.document,jobSkill(item).label,installerIcon(file)),file};
-      pipJobCards.set(item.id,entry);
-      pipJobs.append(entry.card);
-    }
+    const entry = pipJobCards.get(item.id);
     const [label,color] = installerPresentation(item.id,now);
-    if (entry.value.textContent !== label) {
-      entry.value.textContent = label;
+    const value = compactPipInstaller(label);
+    if (entry.value.textContent !== value) {
+      entry.value.textContent = value;
       entry.value.style.color = pipTimeColor(label, color.includes('red') ? '#b91c1c' : color.includes('emerald') ? '#047857' : '#0f172a');
     }
   }
@@ -247,26 +280,48 @@ async function togglePip() {
   const button = $('huntPipBtn');
   button.disabled = true;
   try {
-    const win = await api.requestWindow({width:360,height:310});
+    const jobColumns = Math.ceil(jobInstallers.filter(jobSkill).length / 2);
+    const width = Math.min(505 + jobColumns * 106, globalThis.screen?.availWidth || 1000);
+    const win = await api.requestWindow({width,height:95});
     pipWindow = win;
     const doc = win.document;
     doc.title = '땅캐라 · 사냥 현황';
     doc.documentElement.lang = 'ko';
     doc.body.style.cssText = 'margin:0;padding:10px;background:#f1f5f9;color:#0f172a;font:13px system-ui,sans-serif';
-    const list = doc.createElement('dl');
-    list.style.cssText = 'display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin:0';
+    pipStrip = doc.createElement('div');
+    pipStrip.className = 'pip-strip';
+    pipStrip.style.cssText = 'display:flex;flex:1;min-width:0;overflow-x:auto;align-self:stretch';
+    const style = doc.createElement('style');
+    style.textContent = '.pip-strip > div > div + div {border-top:1px solid #e2e8f0} .pip-close:hover {background:#e2e8f0;color:#0f172a}';
+    doc.head.append(style);
+    let column;
     pipValues = pipFields.map(([label,id], index) => {
+      if (index === 0 || index % 2 === 1) {
+        column = makePipColumn(doc,index===0);
+        pipStrip.append(column);
+      }
       const {card,value} = makePipCard(doc,label,pipIcons[id],index===0);
-      list.append(card);
+      column.append(card);
       return value;
     });
-    pipJobs = list;
-    doc.body.append(list);
+    const panel = doc.createElement('div');
+    panel.style.cssText = 'display:flex;align-items:center;background:#fff;border:1px solid #dbe3ef;border-radius:10px;padding:5px 0';
+    const close = doc.createElement('button');
+    close.type = 'button';
+    close.className = 'pip-close';
+    close.textContent = '×';
+    close.title = 'PiP 닫기';
+    close.setAttribute('aria-label','PiP 닫기');
+    close.style.cssText = 'flex:none;width:28px;height:28px;margin:0 5px;border:0;border-radius:6px;background:transparent;color:inherit;font-size:21px;line-height:1;cursor:pointer';
+    close.addEventListener('click', () => win.close());
+    panel.append(pipStrip,close);
+    doc.body.append(panel);
     win.addEventListener('pagehide', () => {
       if (pipWindow !== win) return;
       pipWindow = null;
       pipValues = [];
-      pipJobs = null;
+      pipStrip = null;
+      pipJobKey = '';
       pipJobCards.clear();
       button.textContent = 'PiP 모드';
     }, {once:true});
@@ -329,12 +384,19 @@ export function bind() {
 
   $('huntToggle').addEventListener('click', () => {
     unlockAudio();
-    S.pauseHunt();
+    if (S.state.hunt.pausedAt !== null) S.resumeHunt();
+    else S.pauseHunt();
     render(Date.now());
   });
 
+  $('huntStop').addEventListener('click', () => { S.endHunt(); render(Date.now()); });
   $('huntRestart').addEventListener('click', () => { unlockAudio(); S.startHunt(); render(Date.now()); });
 
+  $('collectEnabled').checked = S.state.collect.enabled;
+  $('collectEnabled').addEventListener('change', event => {
+    S.setCollectEnabled(event.target.checked);
+    render(Date.now());
+  });
   $('collectSec').value = S.state.collect.sec;
   $('collectSec').addEventListener('change', e => { e.target.value = S.setCollectSec(e.target.value); });
   $('collectReset').addEventListener('click', () => { S.restartCollect(); render(Date.now()); });
@@ -347,13 +409,17 @@ export function bind() {
 export function render(now) {
   const running = S.state.hunt.running;
   setText('huntTime', formatHMS(S.huntMs(now)));
-  setText('huntToggle', running ? '일시정지' : '자동 시작 대기');
-  $('huntToggle').disabled=!running;
+  const paused = S.state.hunt.pausedAt !== null;
+  setText('huntToggle', paused ? '이어서 측정' : running ? '일시정지' : S.state.hunt.manuallyEnded ? '측정 종료됨' : '자동 시작 대기');
+  $('huntToggle').disabled=!running && !paused;
+  $('huntStop').disabled=!running && !paused;
   $('huntRestart').disabled=!S.state.hunt.lastExp;
   $('huntToggle').className = `${running ? BTN_DANGER : BTN_PRIMARY} !py-1.5`;
 
   const left = S.collectLeftMs(now), total = S.state.collect.sec * 1000;
-  setText('collectLeft', left === null ? '--:--' : formatMS(left));
+  setText('collectLeft', !S.state.collect.enabled ? '꺼짐' : left === null ? '--:--' : formatMS(left));
+  $('collectReset').disabled = !S.state.collect.enabled;
+  $('collectSec').disabled = !S.state.collect.enabled;
   $('collectBar').style.width = left === null ? '0%' : `${Math.min(100, (1 - left / total) * 100).toFixed(1)}%`;
 
   renderMeasurements(now);
@@ -368,18 +434,24 @@ const dateTime=new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',year:'nume
 const percent=value=>value==null?'미확인':Number(value).toFixed(4)+'%';
 function renderMeasurements(now){
   const h=S.state.hunt,r=S.state.rune,v=S.state.vision,sharing=getInfo().active;
-  const measureReason=h.running?h.reason:v.exp?.value?.raw?h.reason:(v.exp?.reason||'경험치 숫자 인식 대기');
-  setText('huntMeasureState',measureReason+' · 실제 경험치 숫자 증가로 시작 · 30초간 증가가 없으면 마감');
-  setText('huntExp',h.startExp?(Number.isFinite(h.startExp.percent)&&Number.isFinite(h.currentExp?.percent)?'+'+h.gainPercent.toFixed(4)+'%p':'숫자 측정 중 · 증가율 미확인'):'경험치 인식 대기');
-  setText('huntExpDetail',(h.startExp?percent(h.startExp.percent)+' → '+percent(h.currentExp?.percent)+' · ':'')+'현재 경험치 '+(h.lastExp?.raw?BigInt(h.lastExp.raw).toLocaleString('ko-KR'):'숫자 인식 대기'));
-  const currentPercent = h.lastExp?.percent;
+  const measureReason=(h.running||h.manuallyEnded)?h.reason:v.exp?.value?.raw?h.reason:(v.exp?.reason||'경험치 숫자 인식 대기');
+  setText('huntMeasureState',h.manuallyEnded ? '측정 종료 · 다시 측정 버튼으로 시작' : measureReason+' · 실제 경험치 숫자 증가로 시작 · 30초간 증가가 없으면 마감');
+  const lastPercent = h.percentAnchor?.percent ?? h.lastExp?.percent;
+  const gainedPercent = Number.isFinite(h.startExp?.percent) && Number.isFinite(lastPercent);
+  setText('huntExp', h.startExp
+    ? gainedPercent ? '+'+h.gainPercent.toFixed(4)+'%p' : '+'+BigInt(h.gainRaw).toLocaleString('ko-KR')
+    : h.lastExp?.raw ? '+0' : '경험치 인식 대기');
+  setText('huntExpDetail',(h.startExp?percent(h.startExp.percent)+' → '+percent(h.currentExp?.percent ?? lastPercent)+' · ':'')+'현재 경험치 '+(h.lastExp?.raw?BigInt(h.lastExp.raw).toLocaleString('ko-KR'):'숫자 인식 대기'));
+  const currentPercent = h.lastExp?.percent ?? lastPercent;
   const progress = $('huntExpProgress');
   const percentKnown = Number.isFinite(currentPercent);
   $('huntExpBar').style.width = percentKnown ? currentPercent + '%' : '0%';
   if (percentKnown) progress.setAttribute('aria-valuenow', String(currentPercent));
   else progress.removeAttribute('aria-valuenow');
-  setText('huntFragments',h.fragmentBaseline!==null?'+'+h.fragments+'개':h.latestFragments!==null?h.latestFragments+'개':'수량 인식 대기');
-  setText('huntFragmentsDetail',h.latestFragments===null?'':h.fragmentBaseline===null?'현재 보유량':'현재 '+h.latestFragments+'개');
+  setText('huntFragments', '+'+h.fragments+'개');
+  setText('huntFragmentsDetail',
+    '시작 '+(h.fragmentStart === null ? '—' : h.fragmentStart+'개')+
+    ' → 현재 '+(h.latestFragments === null ? '—' : h.latestFragments+'개'));
   const rune=runePresentation(r,now);
   const runeLabel = rune.label.endsWith('버프 적용 중') ? '룬 버프 적용 중' : rune.label;
   setText('runeState', sharing ? runeLabel : '화면 공유 대기');
@@ -402,7 +474,7 @@ function renderMeasurements(now){
       const started = `${parts.year}. ${parts.month}. ${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
       const row = document.createElement('tr');
       const experience = item.gainPercent === null ? '미확인' : '+' + item.gainPercent.toFixed(4) + '%p';
-      for (const value of [started, formatHMS(item.endedAt - item.startedAt), experience, item.fragments + '개']) {
+      for (const value of [started, formatHMS(item.durationMs ?? (item.endedAt - item.startedAt)), experience, item.fragments + '개']) {
         const cell = document.createElement('td');
         cell.className = 'whitespace-nowrap px-2 py-2';
         cell.textContent = value;

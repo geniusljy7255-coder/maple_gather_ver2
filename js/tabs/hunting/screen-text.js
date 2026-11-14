@@ -1,6 +1,6 @@
-import {SCREEN_GLYPHS} from '../../data/screen-glyphs.js';
+import {SCREEN_GLYPHS,FILLED_EXP_GLYPHS} from '../../data/screen-glyphs.js';
 import { normalize, getTemplates } from './digits.js';
-let bank, nativeBank;
+let bank, nativeBank, filledBank;
 function nativeGlyphs() {
   return nativeBank ??= SCREEN_GLYPHS.map(g => ({
     char:g.char,...normalize(Uint8Array.from(g.bits,Number),g.w,g.h)
@@ -22,18 +22,48 @@ function glyphBank(){
   }
   return bank;
 }
-export function readScreenText(F,box,tone='white'){
+let fragmentBank;
+function fragmentGlyphs() {
+  if (fragmentBank) return fragmentBank;
+  const captured = [
+    ['2',['1111100','1001100','0000001','0111111','1000000','1000000','1111111']],
+    ['3',['1111110','0001000','0000001','0011111','0000001','0000001','1111110']]
+  ].map(([char,rows])=>({char,...normalize(Uint8Array.from(rows.join(''),Number),7,7)}));
+  return fragmentBank = captured;
+}
+export function readScreenText(F,box,tone='white', mergeGaps=false){
   const x0=Math.max(0,Math.round(box.x)),y0=Math.max(0,Math.round(box.y));
   const w=Math.min(Math.round(box.w),F.w-x0),h=Math.min(Math.round(box.h),F.h-y0);
   if(w<1||h<1)return {text:'',confidence:0};
   const bits=new Uint8Array(w*h),runs=[];
   for(let y=0;y<h;y++)for(let x=0;x<w;x++){
     const p=((y+y0)*F.w+x+x0)*4,r=F.rgba[p],g=F.rgba[p+1],b=F.rgba[p+2];
+    if (tone === 'exp') {
+      // White digits over the filled part of the EXP bar can pick up its yellow tint.
+      bits[y*w+x] = r > 175 && b > 105 ? 1 : 0;
+      continue;
+    }
+    if (tone === 'fragment') {
+      bits[y*w+x] = Math.min(r,g,b)>155 ? 1 : 0;
+      continue;
+    }
     bits[y*w+x]=tone==='purple'?(r>135&&b>150&&g>65&&g<r*.95?1:0):Math.min(r,g,b)>(tone==='dim'?125:155)&&Math.max(r,g,b)-Math.min(r,g,b)<65?1:0;
   }
   let start=null;
   for(let x=0;x<=w;x++){let count=0;if(x<w)for(let y=0;y<h;y++)count+=bits[y*w+x];
-    if(count&&start===null)start=x;if(!count&&start!==null){runs.push([start,x]);start=null;}}
+    if(count&&start===null)start=x;if(!count&&start!==null){if(mergeGaps && runs.length && start-runs.at(-1)[1]===1) runs.at(-1)[1]=x;
+      else runs.push([start,x]);
+      start=null;}}
+  if (tone === 'exp') {
+    // The percent sign can split into several narrow segments after encoding.
+    for (let i=runs.length-2;i>=0;i--) {
+      const [left,right]=runs[i], next=runs[i+1];
+      if (next[0]-right===1 && next[1]-left<=10 &&
+          (right-left<=2 || next[1]-next[0]<=2)) {
+        runs.splice(i,2,[left,next[1]]);
+      }
+    }
+  }
   let text='',confidence=1,previousRight=null,lastRunRight=null;
   let baseline=0;for(let y=0;y<h;y++)for(let x=0;x<w;x++)if(bits[y*w+x])baseline=Math.max(baseline,y);
   const decimalBetween=(left,right)=>{
@@ -50,7 +80,7 @@ export function readScreenText(F,box,tone='white'){
     const sub=new Uint8Array(width*h);let top=h,bottom=-1;
     for(let y=0;y<h;y++)for(let x=left;x<right;x++)if(bits[y*w+x]){sub[y*width+x-left]=1;top=Math.min(top,y);bottom=Math.max(bottom,y);}
     const height=bottom-top+1;
-    if(height<=2 && width<=2){text+=',';previousRight=right;continue;}
+    if(height<=Math.max(2,Math.floor((baseline+1)*.35)) && width<=3){if(!text.endsWith(','))text+=',';previousRight=right;continue;}
     const n=normalize(sub,width,h),scores=new Map(),native=new Map();
     const compare = (templates, output) => {
       for (const t of templates) {
@@ -61,6 +91,23 @@ export function readScreenText(F,box,tone='white'){
       }
       return [...output].sort((a,b)=>b[1]-a[1]);
     };
+    if (tone === 'exp') {
+      filledBank ??= FILLED_EXP_GLYPHS.map(g=>({char:g.char,...normalize(Uint8Array.from(g.bits,Number),g.w,g.h)}));
+      const ranked = compare(filledBank,native);
+      if (ranked[0][1]>=.80 && ranked[0][1]-ranked[1][1]>=.025) {
+        text+=ranked[0][0];previousRight=right;confidence=Math.min(confidence,ranked[0][1]);
+        continue;
+      }
+      native.clear();
+    }
+    if (tone === 'fragment') {
+      const nativeRanked = compare(fragmentGlyphs(),native);
+      const ranked = nativeRanked[0][1]>=.95 ? nativeRanked : compare(glyphBank().filter(g=>/^\d$/.test(g.char)),scores);
+      if (ranked[0][1]<.80 || ranked[0][1]-ranked[1][1]<.025) {text+='?';continue;}
+      text+=ranked[0][0];
+      confidence=Math.min(confidence,ranked[0][1]);
+      continue;
+    }
     const trained=compare(nativeGlyphs(),native);
     const useNative=trained[0][1]>=.90&&trained[0][1]-trained[1][1]>=.04;
     const ranked=useNative?trained:compare(glyphBank(),scores);
@@ -76,10 +123,10 @@ export function parseExperience(text){
   const percent=percentMatch?Number(percentMatch[1].replace(',', '.')):null;
   // 퍼센트나 괄호가 깨져도 큰 경험치 숫자를 독립적으로 읽는다. 중간에 빠진 자릿수는 거부한다.
   const prefix=percentMatch?text.slice(0,percentMatch.index):text;
-  const candidates=[...prefix.matchAll(/\d{1,3}(?:,\d{3}){2,}|\d{7,}/g)];
+  const candidates=[...prefix.matchAll(/\d{1,3}(?:[,.]\d{3}){2,}|\d{7,}/g)];
   const valid=candidates.filter(m=>!/[\d,?]/.test(prefix[m.index-1]||'')&&!/[\d,?]/.test(prefix[m.index+m[0].length]||''));
   const token=valid.sort((a,b)=>b[0].length-a[0].length)[0];
-  const raw=token?token[0].replaceAll(',',''):null;
+  const raw=token?token[0].replace(/[,.]/g,''):null;
   if(raw===null && percent===null)return null;
   return {percent:percent!==null&&percent>=0&&percent<100?percent:null,raw,level:null};
 }

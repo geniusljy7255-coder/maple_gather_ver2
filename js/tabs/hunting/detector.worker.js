@@ -3,11 +3,15 @@ import { makeTemplate, prepareFrame, detect, resizeIcon } from './matcher.js';
 import { readDigits } from './digits.js';
 import { analyzeScreen, resetScreenMonitor } from './screen-monitor.js';
 
-const SIZES = [32, 24, 28, 20, 26, 30, 22, 18, 16, 34, 36, 40, 48, 64];
+const SIZES = [32, 45, 44, 24, 28, 20, 26, 30, 22, 18, 16, 34, 36, 40, 48, 64];
+// Keep the common sizes first, then cover intermediate UI scales.
+const INSTALLER_SIZES = [...new Set([
+  ...SIZES, ...Array.from({length:49}, (_, i) => i+16), 68,72,76,80,88,96
+])];
 let targets = [], generation = 0, dimensions = '', scanCursor = 0, localCursor = 0;
 let experienceBox = null;
-let previewTarget = null;
 const isInstaller = target => target.id === "janus" || target.id === "fountain" || target.id.startsWith("job-");
+const isCaptainBomber = target => target.file?.startsWith('캡틴_');
 const tpl = (img,whole=false) => makeTemplate(img.rgba, img.w, img.h,whole);
 
 function cropFrame(frame, x, y, w, h) {
@@ -23,16 +27,12 @@ const isBuff = target => target.id !== 'rune_marker' && target.id !== 'fragments
 
 self.onmessage = ({ data }) => {
   try {
-    if (data.type === 'installer-preview') {
-      previewTarget = data.id;
-      return;
-    }
     if (data.type === 'config') {
       generation = data.generation;
       targets = data.targets.map(t => ({
-        id: t.id, cursor: 0, localSize: 0, locked: null, misses: 0,
-        variants: [...new Set([t.main.w, ...(t.sizes || SIZES)])].map(size => ({
-          thr: t.thr, colorMode:t.colorMode, marker: !!t.marker, main: tpl(resizeIcon(t.main, size),t.whole),
+        id: t.id, file: t.file, cursor: 0, localSize: 0, locked: null, misses: 0,
+        variants: [...new Set([t.main.w, ...(isInstaller(t) ? INSTALLER_SIZES : t.sizes || SIZES)])].map(size => ({
+          thr: isInstaller(t) && size >= 40 && size !== t.main.w ? t.thr-.045 : t.thr, colorMode:t.colorMode, marker: !!t.marker, main: tpl(resizeIcon(t.fhd && size >= 15 ? t.fhd : t.main, size),t.whole),
           reject: t.reject ? tpl(resizeIcon(t.reject, size)) : null, last: null
         }))
       }));
@@ -44,12 +44,23 @@ self.onmessage = ({ data }) => {
     const dims = data.w + 'x' + data.h;
     if (dimensions !== dims) {
       targets.forEach(t => { t.locked = null; t.misses = 0; t.cursor = 0; t.localSize = 0; t.variants.forEach(v => v.last = null); });
+      if (data.w >= 1800 && data.h >= 1000) {
+        for (const target of targets.filter(isInstaller)) {
+          const index = target.variants.findIndex(variant => variant.main.w === 45);
+          if (index >= 0) target.cursor = target.localSize = index;
+        }
+      }
       dimensions = dims;resetScreenMonitor(); experienceBox = null;
     }
     const F = prepareFrame(new Uint8ClampedArray(data.buffer), data.w, data.h);
-    const searching = targets.filter(t => t.locked === null);
+    const selected = data.targetIds ? targets.filter(t => data.targetIds.includes(t.id)) : targets;
+    const searching = selected.filter(t => t.locked === null);
     const nearbyTargets = searching.filter(isBuff);
-    const localTarget = nearbyTargets[localCursor++ % nearbyTargets.length];
+    const installerTargets = nearbyTargets.filter(isInstaller);
+    // Give installer HUD searches half of the local turns even when other buffs are absent.
+    const localTurn = localCursor++;
+    const pool = installerTargets.length && localTurn % 2 === 0 ? installerTargets : nearbyTargets;
+    const localTarget = pool[Math.floor(localTurn/2) % pool.length];
     const fullScanTarget = searching[scanCursor++ % searching.length];
     const anchors = targets.filter(t => isBuff(t) && t.locked !== null && isInstaller(t) === (localTarget && isInstaller(localTarget)))
       .map(t => t.variants[t.locked].last).filter(Boolean);
@@ -66,13 +77,119 @@ self.onmessage = ({ data }) => {
       const y = Math.max(0, experienceBox.y - 180);
       area = cropFrame(F, x, y, Math.min(F.w - x, Math.ceil(F.w * .55)), experienceBox.y - y);
     }
-    const results = targets.map(t => {
+    if (localTarget && isInstaller(localTarget) && (!anchors.length || anchors.every(anchor => anchor.y < F.h*.5)) && F.w >= 1800 && F.h >= 1000) {
+      const x = Math.floor(F.w*.22), y = Math.floor(F.h*.76);
+      area = cropFrame(F,x,y,Math.ceil(F.w*.24),F.h-y);
+    }
+    // Nearby installer slots can shift whenever another buff appears or expires.
+    const hudX = Math.floor(F.w*.16), hudY = Math.floor(F.h*.74);
+    const searchesHud = t => (['janus','fountain'].includes(t.id) || isCaptainBomber(t)) &&
+      (t.locked === null || t.misses > 0 || t.variants[t.locked].last?.y < F.h*.5);
+    const hud = selected.some(searchesHud) ? cropFrame(F,hudX,hudY,Math.ceil(F.w*.38),F.h-hudY) : null;
+    const runeTypes = ['rune_normal','rune_blessed','rune_cooldown'];
+    const runeX = Math.floor(F.w*.53);
+    const runeHud = selected.some(t => runeTypes.includes(t.id) && t.locked === null)
+      ? cropFrame(F,runeX,0,F.w-runeX,Math.ceil(F.h*.24)) : null;
+    const markerHud = selected.some(t => t.id === 'rune_marker')
+      ? cropFrame(F,0,0,Math.ceil(F.w*.30),Math.ceil(F.h*.40)) : null;
+    const fragmentsX = Math.floor(F.w*.28), fragmentsY = Math.floor(F.h*.63);
+    const fragmentsHud = selected.some(t=>t.id==='fragments_icon' && t.locked===null)
+      ? cropFrame(F,fragmentsX,fragmentsY,Math.ceil(F.w*.44),Math.ceil(F.h*.32)) : null;
+    const results = selected.map(t => {
       let r;
+      // Reject shortcut-bar candidates, including when following a previous match.
+      const inBuffArea = (x,y,size) => x+size*.5 < F.w*.57 || y+size*.5 < F.h*.86;
+      const variantAt = (variant, region) => t.id.startsWith('job-')
+        ? {...variant,acceptPosition:(x,y,size)=>inBuffArea(x+(region?.x ?? 0),y+(region?.y ?? 0),size)}
+        : variant;
+      if (fragmentsHud && t.id === 'fragments_icon') {
+        const sizes = F.w >= 1800 ? [34,33,32,35,36,24] : [24,23,25,26,32,34];
+        for (const size of sizes) {
+          const index = t.variants.findIndex(v=>v.main.w===size);
+          if (index<0) continue;
+          const variant=t.variants[index];
+          const hit=detect(fragmentsHud.frame,{...variant,scanOptions:{coarseMin:.44,maxCands:16}});
+          if (!hit.found) continue;
+          hit.x+=fragmentsHud.x;
+          hit.y+=fragmentsHud.y;
+          variant.last={x:hit.x,y:hit.y};
+          t.locked=index;
+          t.misses=0;
+          return {id:t.id,...hit};
+        }
+      }
+      if (markerHud && t.id === 'rune_marker') {
+        const size = t.variants[t.localSize++ % t.variants.length].main.w;
+        const preferred = F.w >= 1800 ? [17,16,18,12,14] : [12,14,16,17];
+        const trackedSize = t.variants[t.locked]?.main.w;
+        const candidates = new Set([trackedSize,...preferred,size]);
+        let best = null;
+        for (const candidate of candidates) {
+          const index = t.variants.findIndex(v=>v.main.w===candidate);
+          if (index<0) continue;
+          const variant=t.variants[index];
+          const hit=detect(markerHud.frame,variant);
+          if (hit.found && (!best || hit.score > best.hit.score)) best = {index,hit};
+        }
+        if (best) {
+          const {index,hit}=best;
+          if (t.locked!==null && t.locked!==index) t.variants[t.locked].last=null;
+          t.variants[index].last={x:hit.x,y:hit.y};
+          t.locked=index;
+          t.misses=0;
+          return {id:t.id,...hit};
+        }
+      }
+      if (runeHud && runeTypes.includes(t.id) && t.locked === null) {
+        const sizes = F.w >= 1800 && F.h >= 1000 ? [45,44,43,46,48,32] : [32,31,33,34,30];
+        for (const size of sizes) {
+          const index = t.variants.findIndex(variant => variant.main.w === size);
+          if (index < 0) continue;
+          const variant = t.variants[index];
+          const hit = detect(runeHud.frame,{
+            ...variant,thr:t.id==='rune_cooldown' ? .83 : variant.thr,
+            scanOptions:{coarseMin:.40,maxCands:24}
+          });
+          if (!hit.found) continue;
+          hit.x += runeHud.x;
+          hit.y += runeHud.y;
+          variant.last = {x:hit.x,y:hit.y};
+          t.locked=index;
+          t.misses=0;
+          return {id:t.id,...hit};
+        }
+      }
+      if (hud && searchesHud(t)) {
+        const sizes = F.w >= 1800 && F.h >= 1000 ? [45,44,32] : [32,31,33];
+        const trackedSize = t.locked === null ? null : t.variants[t.locked].main.w;
+        for (const size of new Set([trackedSize,...sizes])) {
+          const index = t.variants.findIndex(v => v.main.w === size);
+          if (index < 0) continue;
+          const variant = t.variants[index];
+          const hit = detect(hud.frame,{...variantAt(variant,hud),last:null,scanOptions:{coarseMin:.42,maxCands:24}});
+          if (!hit.found) continue;
+          if (t.locked !== null) t.variants[t.locked].last = null;
+          hit.x += hud.x;
+          hit.y += hud.y;
+          variant.last = {x:hit.x,y:hit.y};
+          t.locked=index;
+          t.misses=0;
+          return {id:t.id,...hit};
+        }
+      }
       if (t.locked !== null) {
         const v = t.variants[t.locked];
-        r = detect(F, v, { allowScan: false, trackRadius: isInstaller(t) && t.misses ? 8 : 3 });
+        r = detect(F, variantAt(v), { allowScan: false, trackRadius: isInstaller(t) && t.misses ? 8 : 3 });
         if (r.found) { t.misses = 0; v.last = { x: r.x, y: r.y }; return { id: t.id, ...r }; }
-        if (++t.misses < 3) return { id: t.id, ...r };
+        if (t.id === 'rune_marker') {
+          const marker = detect(markerHud.frame,{...v,last:null});
+          if (marker.found) {
+            v.last={x:marker.x,y:marker.y};
+            t.misses=0;
+          }
+          if (marker.found) return {id:t.id,...marker};
+        }
+        if (++t.misses < (t.id === 'rune_marker' || runeTypes.includes(t.id) || isCaptainBomber(t) ? 1 : 3)) return { id: t.id, ...r };
         v.last = null;
         t.cursor = t.locked;
         t.locked = null;
@@ -82,27 +199,38 @@ self.onmessage = ({ data }) => {
         index = t.localSize++ % t.variants.length;
         const variant = t.variants[index];
         r = detect(area.frame, isInstaller(t)
-          ? { ...variant, scanOptions: { coarseMin: .42, maxCands: 24 } }
+          ? { ...variantAt(variant,area), scanOptions: { coarseMin: .42, maxCands: 24 } }
           : variant);
+        if (!r.found && isInstaller(t) && F.w >= 1800 && area.frame.w <= F.w*.5 &&
+            variant.main.w >= 43 && variant.main.w <= 46) {
+          const neighbor = t.variants.findIndex(v => v.main.w === (variant.main.w === 45 ? 44 : 45));
+          if (neighbor >= 0) {
+            const alternate = detect(area.frame, {...variantAt(t.variants[neighbor],area),scanOptions:{coarseMin:.42,maxCands:24}});
+            if (alternate.found) { index=neighbor; r=alternate; }
+          }
+        }
         if (r.found) { r.x += area.x; r.y += area.y; }
       }
       if (!r?.found && t === fullScanTarget) {
         index = t.cursor++ % t.variants.length;
         const variant = t.variants[index];
+        const localResult = r;
         r = detect(F, isInstaller(t) && variant.main.w <= 24
-          ? { ...variant, scanOptions: { coarseMin: .40, maxCands: 24 } }
-          : variant);
+          ? { ...variantAt(variant), scanOptions: { coarseMin: .40, maxCands: 24 } }
+          : variantAt(variant));
+        if (!r.found && localResult?.score > r.score) r = localResult;
       }
-      if (!r?.found && t !== fullScanTarget) {
+      if (!r) {
         r = detect(F, t.variants[index], { allowScan: false });
       }
+      if (t.id === 'rune_marker' && !r.found && markerHud) r.mode = 'scan';
       const v = t.variants[index];
       if (r.found) {
         v.last = { x: r.x, y: r.y };
         t.locked = index;
         if (isInstaller(t)) {
           for (const peer of targets) {
-            if (peer !== t && isInstaller(peer) && peer.locked === null) {
+            if (peer !== t && isInstaller(peer) && peer.locked === null && peer.localSize === 0) {
               const matchingSize = peer.variants.findIndex(v => v.main.w === r.size);
               if (matchingSize >= 0) peer.localSize = matchingSize;
             }
@@ -112,7 +240,26 @@ self.onmessage = ({ data }) => {
       }
       return { id: t.id, ...r };
     });
+    const bomberAlternates = [];
     for (const result of results) {
+      const target = targets.find(item => item.id === result.id);
+      if (!result.found || !target?.file?.includes('배틀쉽_봄버')) continue;
+      const variant = target.variants[target.locked];
+      const size = result.size;
+      const x = Math.max(0,result.x-size*3), y = Math.max(0,result.y-size);
+      const right = Math.min(F.w,result.x+size*4), bottom = Math.min(F.h,result.y+size*2);
+      const nearby = cropFrame(F,x,y,right-x,bottom-y);
+      const alternate = detect(nearby.frame,{
+        ...variant,last:null,scanOptions:{coarseMin:.42,maxCands:24},
+        acceptPosition:(px,py,w) => {
+          const ax=px+x, ay=py+y;
+          return (ax+w*.5<F.w*.57 || ay+w*.5<F.h*.86) &&
+            (Math.abs(ax-result.x)>=size*.8 || Math.abs(ay-result.y)>=size*.8);
+        }
+      });
+      if (alternate.found) bomberAlternates.push({id:result.id,...alternate,x:alternate.x+x,y:alternate.y+y});
+    }
+    for (const result of [...results,...bomberAlternates]) {
       if (!result.id.startsWith('job-') || !result.found) continue;
       const target = targets.find(item => item.id === result.id);
       const background = target?.variants[target.locked]?.main.rgba;
@@ -121,7 +268,24 @@ self.onmessage = ({ data }) => {
       // a gold border. Try the strip without subtraction too: yellow art
       // underneath a real digit can otherwise erase part of its stroke.
       const center = [.16,.31,.84,.69];
-      let reading = readDigits(result.preview,result.size,{area:center,min:1,background,aligned:true});
+      if (isCaptainBomber(target)) {
+        // The golden artwork touches the digits outside this central strip.
+        const areas = [[.29,.36,.71,.66],[.27,.38,.73,.70]];
+        for (const area of areas) {
+          const timer = readDigits(result.preview,result.size,{area,min:1,aligned:true});
+          if (timer.seconds === null) continue;
+          Object.assign(result,timer);
+          break;
+        }
+        if (result.seconds !== null) continue;
+      }
+      const goldArt = target.file?.includes('칼리_데스_블로섬');
+      let reading = goldArt ? readDigits(result.preview,result.size,{
+        area:[.27,.378,.74,.667],min:1,goldTimer:true,aligned:true
+      }) : {seconds:null};
+      if (reading.seconds === null) {
+        reading = readDigits(result.preview,result.size,{area:center,min:1,background,aligned:true});
+      }
       if (reading.seconds === null) {
         reading = readDigits(result.preview,result.size,{area:center,min:1,aligned:true});
       }
@@ -136,30 +300,101 @@ self.onmessage = ({ data }) => {
         reading = readDigits(result.preview,result.size,{...options,light:true});
         if (reading.seconds !== null) break;
       }
+      if (reading.seconds === null && result.size !== 32) {
+        const normalized = resizeIcon({rgba:result.preview,w:result.size,h:result.size},32);
+        reading = readDigits(normalized.rgba,32,{area:[.10,.28,.90,.76],min:1,aligned:true});
+      }
       // Keep a valid unmasked reading when the overlay shares the base art's color.
       if (reading.seconds !== null || result.seconds === null) Object.assign(result,reading);
     }
-    const buffHits=results.filter(r=>r.found&&(r.id==='rune_normal'||r.id==='rune_blessed'));
+    for (const result of results) {
+      if (!result.found || result.seconds !== null || result.size < 40 ||
+          !['janus','fountain'].includes(result.id)) continue;
+      const normalized = resizeIcon({rgba:result.preview,w:result.size,h:result.size},32);
+      const reading = readDigits(normalized.rgba,32);
+      if (reading.seconds !== null) Object.assign(result,reading);
+    }
+    // Both colored effects can match the same template. Read the other
+    // slots in the same buff row even while the primary match is locked.
+    const runeBuffIds = ['rune_normal','rune_blessed'];
+    const runeAlternates = [];
+    for (const primary of results) {
+      if (!primary.found || !runeBuffIds.includes(primary.id)) continue;
+      const target = targets.find(t => t.id === primary.id);
+      const variant = target.variants[target.locked];
+      const {size} = primary;
+      const x = Math.max(0,primary.x-size*2), y = Math.max(0,primary.y-Math.ceil(size*.25));
+      const right = Math.min(F.w,primary.x+size*3);
+      const bottom = Math.min(F.h,primary.y+Math.ceil(size*1.25));
+      const region = cropFrame(F,x,y,right-x,bottom-y);
+      const neighbors = results.filter(r=>r.found && runeTypes.includes(r.id)).concat(runeAlternates);
+      const hit = detect(region.frame,{
+        ...variant,last:null,thr:variant.thr-.04,
+        scanOptions:{coarseMin:.38,maxCands:32},
+        acceptPosition:(px,py)=>neighbors.every(r=>
+          Math.abs(x+px-r.x)>=size*.65 || Math.abs(y+py-r.y)>=size*.65)
+      });
+      if (hit.found) runeAlternates.push({id:primary.id,...hit,x:hit.x+x,y:hit.y+y});
+    }
+    results.push(...runeAlternates);
+    for (const result of results) {
+      if (!result.found || !runeBuffIds.includes(result.id) ||
+          (result.seconds !== null && result.confidence >= .83)) continue;
+      const icon = resizeIcon({rgba:result.preview,w:result.size,h:result.size},32);
+      for (const reading of [
+        readDigits(result.preview,result.size,{min:1,area:[.10,.28,.90,.72],aligned:true}),
+        readDigits(icon.rgba,32,{min:1})
+      ]) {
+        if (reading.seconds !== null && reading.confidence >= .83) {
+          Object.assign(result,reading);
+          break;
+        }
+      }
+    }
+    for (const alternate of bomberAlternates) {
+      const primary = results.find(result => result.id === alternate.id);
+      if (alternate.seconds !== null && (primary.seconds === null || alternate.seconds < primary.seconds)) {
+        Object.assign(primary,alternate);
+      }
+    }
     for(const r of results)if(r.id==='rune_cooldown'&&r.found){
-      // 버프와 재사용 대기를 같은 좌표에서 동시에 인정하지 않는다.
-      if(buffHits.some(b=>Math.abs(b.x-r.x)<r.size*.5&&Math.abs(b.y-r.y)<r.size*.5)){
-        r.found=false;r.identity=false;r.seconds=null;
-        const target=targets.find(t=>t.id===r.id);target.locked=null;target.variants.forEach(v=>v.last=null);
+      for (const buff of results) {
+        if (!buff.found || !['rune_normal','rune_blessed'].includes(buff.id) ||
+            Math.abs(buff.x-r.x)>=r.size*.5 || Math.abs(buff.y-r.y)>=r.size*.5) continue;
+        Object.assign(buff,{found:false,identity:false,seconds:null});
+        const target = targets.find(t=>t.id===buff.id);
+        const slot = target.variants[target.locked]?.last;
+        if (slot && Math.abs(slot.x-buff.x)<r.size*.5 && Math.abs(slot.y-buff.y)<r.size*.5) {
+          target.variants[target.locked].last=null;
+          target.locked=null;
+        }
+      }
+      // The minute label is white and confined to the lower-left slot.
+      const minuteArea=[.02,.65,.58,1];
+      const minuteOptions={min:10,area:minuteArea,light:true,aligned:true};
+      const nativeMinute=readDigits(r.preview,r.size,minuteOptions);
+      const icon=resizeIcon({rgba:r.preview,w:r.size,h:r.size},32);
+      const minute=nativeMinute.seconds!==null && nativeMinute.confidence>=.83
+        ? nativeMinute : readDigits(icon.rgba,32,minuteOptions);
+      if (minute.seconds>=10 && minute.seconds<=15 && minute.confidence>=.83) {
+        Object.assign(r,minute,{unit:'minutes'});
         continue;
       }
-      const options={min:1,area:[.03,.56,.75,.97]};
-      const a=readDigits(r.preview,r.size,{...options,light:true}),b=readDigits(r.preview,r.size,{...options,dark:true});
-      const reading=a.seconds!==null&&b.seconds!==null&&a.seconds!==b.seconds?{seconds:null,confidence:0,digit:'uncertain'}:a.seconds!==null?a:b;
-      Object.assign(r,reading);
+      const secondsOptions={min:1,area:[.10,.25,.90,.75],aligned:true};
+      const nativeSeconds=readDigits(r.preview,r.size,secondsOptions);
+      const seconds=nativeSeconds.seconds!==null && nativeSeconds.confidence>=.83
+        ? nativeSeconds : readDigits(icon.rgba,32,secondsOptions);
+      Object.assign(r,seconds,{unit:'seconds'});
+
     }
-    const monitor=analyzeScreen(F,results,data.t);
+    const monitor=data.targetIds ? null : analyzeScreen(F,results,data.t);
     if (monitor?.exp.box) {
       if (!experienceBox) {
-        for (const target of targets.filter(isInstaller)) target.localSize = 0;
+        for (const target of targets.filter(isInstaller)) target.localSize = target.cursor % target.variants.length;
       }
       experienceBox = monitor.exp.box;
     }
-    for (const result of results) if (result.id !== previewTarget) delete result.preview;
+    for (const result of results) delete result.preview;
     postMessage({ type: 'result', generation, t: data.t, ms: performance.now() - t0, results, monitor });
   } catch (e) {
     postMessage({ type: 'error', generation, message: String(e?.message || e) });

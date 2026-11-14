@@ -38,7 +38,7 @@ import { onTick } from '../../core/clock.js';
 import { notify } from '../../core/notify.js';
 import { getInfo, grabFrame, onCaptureChange } from './capture.js';
 import { TARGETS, getIcon, getThreshold, loadIcons, onIconsChange } from './icons.js';
-import { startDetector, configure, analyze, canAnalyze, requestInstallerPreview } from './detector.js';
+import { startDetector, configure, analyze, canAnalyze } from './detector.js';
 
 import { freshState, advance } from './tracking-state.js';
 
@@ -47,42 +47,56 @@ const fresh = t => ({ id: t.id, label: t.label, ...freshState(), last: null });
 export const trackers = Object.fromEntries(TARGETS.map(t => [t.id, fresh(t)]));
 export function resetTrackers() { [...TARGETS,...jobTargets].forEach(t => { trackers[t.id] = fresh(t); }); }
 
-let diagnostic = null;
+function notifyInstaller(id) {
+  if (id === 'janus' || id === 'fountain') {
+    notify(id === 'janus' ? '야누스 재설치' : '파운틴 재설치', 'alert', id);
+  }
+}
 
-export function collectInstallerDiagnostic(id, duration = 6000) {
-  if (diagnostic) return Promise.reject(new Error('busy'));
-  if (!getInfo().active || !trackers[id]) return Promise.reject(new Error('unavailable'));
-  return new Promise(resolve => {
-    const samples = [];
-    diagnostic = {id, samples};
-    requestInstallerPreview(id, true);
-    setTimeout(() => {
-      requestInstallerPreview(id, false);
-      diagnostic = null;
-      resolve(samples);
-    }, duration);
-  });
+export function expireInstallers(now) {
+  for (const tracker of Object.values(trackers)) {
+    if (tracker.deadline === null) continue;
+    if (now >= tracker.deadline && !tracker.needsReinstall) {
+      tracker.needsReinstall = true;
+      tracker.recoveryUntil = now + 8000;
+    }
+    if (now >= tracker.deadline - 1000 && !tracker.alerted) {
+      tracker.alerted = true;
+      notifyInstaller(tracker.id);
+    }
+  }
 }
 
 export function handleResult(msg) {
   if (!getInfo().active) return;
+  expireInstallers(msg.t);
   handleMonitor(msg);
+  const lost = msg.results.some(r => trackers[r.id]?.deadline > msg.t &&
+    !r.found && r.mode === 'scan');
+  if (lost && msg.t >= nextRecoveryAt) {
+    fastUntil = Math.max(fastUntil,msg.t+2500);
+    nextRecoveryAt = msg.t+15000;
+  }
+  if (msg.results.some(r => r.found && trackers[r.id]?.deadline == null && trackers[r.id]) &&
+      msg.t >= nextRecoveryAt) {
+    fastUntil = Math.max(fastUntil,msg.t+2500);
+    nextRecoveryAt = msg.t+15000;
+  }
   for (const r of msg.results) {
     const tr = trackers[r.id];
+
     if (!tr) continue;
     tr.last = r;
-    if (r.found) tr.lastSeen = msg.t;
-    if (diagnostic?.id === r.id && diagnostic.samples.length < 32) {
-      diagnostic.samples.push({
-        time:msg.t, found:r.found, mode:r.mode, score:r.score,
-        x:r.x, y:r.y, size:r.size, seconds:r.seconds ?? null,
-        confidence:r.confidence ?? null, digit:r.digit ?? null,
-        deadline:tr.deadline, candidates:tr.samples.slice(),
-        rgba:r.preview ? Array.from(r.preview) : null
-      });
+    if (r.found) {
+      tr.lastSeen = msg.t;
+      if ((tr.deadline === null || tr.needsReinstall) &&
+          msg.t >= (tr.nextTimerRetryAt ?? 0)) {
+        tr.nextTimerRetryAt = msg.t + 8000;
+        tr.recoveryUntil = Math.max(tr.recoveryUntil ?? 0,msg.t + 3200);
+      }
     }
-    delete r.preview;
-    if (advance(tr, r, msg.t) && (tr.id === 'janus' || tr.id === 'fountain')) notify(tr.id === 'janus' ? '야누스 재설치' : '파운틴 재설치', 'alert', tr.id);
+    advance(tr, r, msg.t);
+    if (tr.deadline > msg.t && !tr.needsReinstall) tr.recoveryUntil = 0;
   }
 }
 
@@ -93,11 +107,47 @@ export function pushConfig() {
   configure([...list,...extraTargets,...jobTargets]);
 }
 
+const refreshMs = 5000;
+const confirmationMs = 500;
 let lastGrab = 0;
+let burstStartedAt = 0;
+let burstFrames = 0;
+let retryAt = 0;
+let fastUntil = 0;
+let initialExpUntil = 0;
+let nextRecoveryAt = 0;
 function submitFrame(now) {
-  if (!getInfo().active || now - lastGrab < 200 || !canAnalyze(now)) return;
+  if (!getInfo().active || !canAnalyze(now)) return;
+  if (now < fastUntil || (now < initialExpUntil && (!sessionState.hunt.lastExp || sessionState.hunt.latestFragments === null))) {
+    if (now-lastGrab < 250) return;
+    const img = grabFrame();
+    if (img && analyze(img,now)) {
+      lastGrab=now;
+      burstFrames=0;
+      retryAt=now+refreshMs;
+    }
+    return;
+  }
+  // Check all recovering installers on the same frame. Experience, runes
+  // and active timers keep their normal refresh schedule.
+  if (!burstFrames && now < retryAt) {
+    const waiting = Object.values(trackers).filter(tr => tr.needsReinstall ||
+      (tr.deadline === null && tr.recoveryUntil > now));
+    if (!waiting.length || now-lastGrab < 600) return;
+    const img = grabFrame();
+    if (img && analyze(img,now,waiting.map(target=>target.id))) lastGrab=now;
+    return;
+  }
+  if (!burstFrames && now >= retryAt) {
+    burstStartedAt = now;
+    burstFrames = 3;
+  }
+  if (!burstFrames || now - lastGrab < confirmationMs) return;
   const img = grabFrame();
-  if (img && analyze(img, now)) lastGrab = now;
+  if (img && analyze(img, now)) {
+    lastGrab = now;
+    if (--burstFrames === 0) retryAt = burstStartedAt + refreshMs;
+  }
 }
 export async function initTracking() {
   startDetector(result => {
@@ -105,10 +155,23 @@ export async function initTracking() {
     submitFrame(Date.now());
   });
   onIconsChange(pushConfig);
-  onCaptureChange(info => { if(!info.active)captureEnded();resetTrackers();pushConfig(); });
+  onCaptureChange(info => {
+    fastUntil = info.active ? Date.now()+4000 : 0;
+    initialExpUntil = info.active ? Date.now()+8000 : 0;
+    nextRecoveryAt = fastUntil+5000;
+    burstFrames = 0;
+    retryAt = 0;
+    lastGrab = 0;
+    if (!info.active) captureEnded();
+    resetTrackers();
+    pushConfig();
+  });
   onJobInstallersChange(configureJobInstallers);
   await loadIcons();
   await configureJobInstallers();
   const assets=await loadMonitorAssets();extraTargets=assets.targets;sessionState.vision.assets=assets.missing;pushConfig();
-  onTick(submitFrame);
+  onTick(now => {
+    if (getInfo().active) expireInstallers(now);
+    submitFrame(now);
+  });
 }

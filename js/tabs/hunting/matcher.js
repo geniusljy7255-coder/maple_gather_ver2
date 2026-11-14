@@ -48,7 +48,7 @@ function integral(g, w, h) {
 export function makeTemplateGray(g, w, h, valid = null, whole = false) {
   const full=whole===true,cooldown=whole==='cooldown';
   const x0=full||cooldown?0:Math.floor(w/8),x1=full?0:cooldown?Math.ceil(w*.75):w-x0,
-    y0=full?0:cooldown?Math.floor(h*.5):Math.floor(h/4),y1=full?0:cooldown?h:Math.ceil(h*.72);
+    y0=full?0:cooldown?Math.floor(h*.25):Math.floor(h/4),y1=full?0:cooldown?h:Math.ceil(h*.72);
   const dx = [], dy = [], val = [], exx = [], exy = [];
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -221,7 +221,7 @@ export function scanMarker(F,t) {
     const seen=new Uint8Array(F.w*F.h),mask=new Uint8Array(F.w*F.h),centers=[];
     for(let i=0;i<mask.length;i++){
       const p=i*4,r=F.rgba[p],g=F.rgba[p+1],b=F.rgba[p+2];
-      mask[i]=r>110&&b>140&&g<Math.min(r,b)*.8&&b>=r*.9?1:0;
+      mask[i]=r>105&&b>125&&g<Math.min(r,b)*.86&&b>=r*.86?1:0;
     }
     for(let i=0;i<mask.length;i++)if(mask[i]&&!seen[i]){
       const queue=[i];seen[i]=1;let minX=F.w,maxX=0,minY=F.h,maxY=0;
@@ -238,8 +238,8 @@ export function scanMarker(F,t) {
     }
     F._markerCenters=centers;
   }
-  return F._markerCenters.filter(c=>c.w>=t.w*.2&&c.h>=t.h*.2&&c.w<=t.w&&c.h<=t.h)
-    .map(c=>trackNear(F,t,Math.round(c.x-t.w/2),Math.round(c.y-t.h/2),2)).sort((a,b)=>b.s-a.s);
+  return F._markerCenters.filter(c=>c.w>=t.w*.18&&c.h>=t.h*.18&&c.w<=t.w&&c.h<=t.h)
+    .map(c=>trackNear(F,t,Math.round(c.x-(t.w-1)/2),Math.round(c.y-(t.h-1)/2),3)).sort((a,b)=>b.s-a.s);
 }
 
 /** 한 대상 판정.
@@ -247,10 +247,13 @@ export function scanMarker(F,t) {
 export function detect(F, target, { allowScan = true, trackRadius = 3 } = {}) {
   const { main, reject, thr } = target;
   const accept = (c, need = thr) => {
+    if (target.acceptPosition && !target.acceptPosition(c.x,c.y,main.w)) return false;
     if (c.s < need) return false;
-    c.chroma=iconChroma(F,main,c.x,c.y);
-    if(target.colorMode==='gray' && (c.chroma.mean>.12||c.chroma.colored>.18))return false;
-    if(target.colorMode==='color' && c.chroma.mean<.13)return false;
+    if (target.colorMode) {
+      c.chroma = iconChroma(F, main, c.x, c.y);
+      const coloredRune = c.chroma.blue >= .30;
+      if ((target.colorMode === 'color') !== coloredRune) return false;
+    }
     c.color = colorSimilarity(F, main, c.x, c.y);
     if (c.color < 0.72) return false;
     if (reject && zncc(F.G, F.w, F.h, reject.full, c.x, c.y) > c.s + 0.025) return false;
@@ -278,14 +281,16 @@ export function detect(F, target, { allowScan = true, trackRadius = 3 } = {}) {
 }
 
 export function iconChroma(F,t,x,y){
-  let sum=0,colored=0,count=0;
+  let sum=0,colored=0,blue=0,count=0;
   for(let i=0;i<t.full.n;i++){
     const p=((y+t.full.dy[i])*F.w+x+t.full.dx[i])*4;
     const r=F.rgba[p],g=F.rgba[p+1],b=F.rgba[p+2],max=Math.max(r,g,b),min=Math.min(r,g,b);
     if(max<65)continue;const saturation=(max-min)/max;
     sum+=saturation;count++;if(saturation>.25)colored++;
+    // Rune artwork is blue or violet. Yellow countdown strokes carry no identity.
+    if (b > r + 20 && (b > g + 14 || g > r + 25)) blue++;
   }
-  return {mean:count?sum/count:0,colored:count?colored/count:0};
+  return {mean:count?sum/count:0,colored:count?colored/count:0,blue:count?blue/count:0};
 }
 
 // 밝기가 달라져도 유지되는 RGB 비율을 숫자 영역 밖에서 비교한다.
@@ -304,13 +309,21 @@ function colorSimilarity(F, t, x, y) {
 }
 
 export function resizeIcon(img, size) {
+  if (img.w === size && img.h === size) return img;
   const rgba = new Uint8ClampedArray(size * size * 4);
-  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-    const src = (Math.min(img.h-1, Math.floor(y * img.h / size)) * img.w +
-      Math.min(img.w-1, Math.floor(x * img.w / size))) * 4;
-    rgba.set(img.rgba.subarray ? img.rgba.subarray(src, src+4) : img.rgba.slice(src, src+4), (y*size+x)*4);
+  for (let y=0; y<size; y++) for (let x=0; x<size; x++) {
+    const u=Math.max(0,Math.min(img.w-1,(x+.5)*img.w/size-.5));
+    const v=Math.max(0,Math.min(img.h-1,(y+.5)*img.h/size-.5));
+    const left=Math.floor(u),top=Math.floor(v);
+    const right=Math.min(left+1,img.w-1),bottom=Math.min(top+1,img.h-1);
+    const dx=u-left,dy=v-top;
+    for(let c=0;c<4;c++) {
+      rgba[(y*size+x)*4+c] =
+        (img.rgba[(top*img.w+left)*4+c]*(1-dx)+img.rgba[(top*img.w+right)*4+c]*dx)*(1-dy)+
+        (img.rgba[(bottom*img.w+left)*4+c]*(1-dx)+img.rgba[(bottom*img.w+right)*4+c]*dx)*dy;
+    }
   }
-  return { rgba, w: size, h: size };
+  return {rgba,w:size,h:size};
 }
 
 function done(F, c, mode, rejected, main) {

@@ -24,7 +24,25 @@ test('raw-only observations start collection alerts and save percent-null histor
  assert.equal(S.state.hunt.running,true);assert.equal(S.state.collect.deadline,102000);
  for(let i=1;i<=5;i++)S.handleMonitor({t:2000+i*20000,results:[],monitor:{exp:{value:{raw:String(38003778803411n+BigInt(i)),percent:null}}}});
  const events=[];N.onNotify(e=>events.push(e));S.tick(102000);assert.ok(events.some(e=>e.channel==='collect'));
- S.pauseHunt(103000);assert.equal(JSON.parse(saved.get('hunt_history_v1'))[0].startExp.percent,null);ui.render(103000);
+ S.pauseHunt(103000);
+ const elapsed=S.huntMs(103000),left=S.collectLeftMs(103000),eventCount=events.length;
+ S.handleMonitor({t:150000,results:[],monitor:{exp:{value:{raw:'38003778803430',percent:null}}}});
+ S.tick(200000);
+ assert.equal(S.state.hunt.running,false);
+ assert.equal(S.huntMs(200000),elapsed);
+ assert.equal(S.collectLeftMs(200000),left);
+ assert.equal(events.length,eventCount);
+ S.resumeHunt(201000);
+ assert.equal(S.huntMs(202000),elapsed+1000);
+ assert.equal(S.collectLeftMs(202000),left-1000);
+ S.setCollectEnabled(false,202000);
+ assert.equal(S.collectLeftMs(202000),null);
+ S.tick(203000);
+ assert.equal(events.length,eventCount);
+ S.setCollectEnabled(true,203000);
+ assert.equal(S.collectLeftMs(203000),100000);
+ S.stopHunt(204000);
+ assert.equal(JSON.parse(saved.get('hunt_history_v1'))[0].startExp.percent,null);ui.render(204000);
 });
 
 test('master and individual alarm controls stay in sync',()=>{
@@ -61,4 +79,47 @@ test('overlapping announcements play in order and recover from a speech error',(
    speechSynthesis.speak = previous;
    for (const item of spoken) item.onend();
  }
+});
+
+test('manual end saves the hunt and keeps collection stopped until restart',()=>{
+ S.startHunt(250000);
+ S.endHunt(251000);
+ const records=S.state.hunt.history.length;
+ const raw=String(BigInt(S.state.hunt.lastExp.raw)+1n);
+ S.handleMonitor({t:252000,results:[],monitor:{exp:{value:{raw,percent:null}}}});
+ assert.equal(S.state.hunt.running,false);
+ assert.equal(S.state.hunt.history.length,records);
+ assert.equal(S.state.collect.deadline,0);
+ S.startHunt(253000);
+ assert.equal(S.state.hunt.running,true);
+ assert.equal(S.state.hunt.startExp.raw,raw);
+ S.captureEnded(254000);
+});
+test('a confirmed first fragment increase preserves the earlier starting count',()=>{
+ S.captureEnded(300000);
+ S.startHunt(301000);
+ S.handleMonitor({t:302000,results:[],monitor:{fragments:{value:24,previous:23}}});
+ assert.equal(S.state.hunt.fragmentStart,23);
+ assert.equal(S.state.hunt.latestFragments,24);
+ assert.equal(S.state.hunt.fragments,1);
+ S.captureEnded(303000);
+});
+test('confirmed installer expires and notifies once without further frame results',async()=>{
+ const {trackers,expireInstallers}=await import('../js/tabs/hunting/trackers.js');
+ const previous={...trackers.janus};
+ const events=[];N.onNotify(e=>events.push(e));
+ try {
+   N.setAlarmEnabled('janus',true);
+   Object.assign(trackers.janus,{deadline:3000,needsReinstall:false,alerted:false});
+   expireInstallers(1999);
+   assert.equal(events.filter(e=>e.channel==='janus').length,0);
+   expireInstallers(2000);
+   assert.equal(events.filter(e=>e.channel==='janus').length,1);
+   assert.equal(trackers.janus.needsReinstall,false);
+   expireInstallers(2999);
+   expireInstallers(3000);
+   expireInstallers(3500);
+   assert.equal(trackers.janus.needsReinstall,true);
+   assert.equal(events.filter(e=>e.channel==='janus').length,1);
+ } finally {Object.assign(trackers.janus,previous);}
 });

@@ -35,7 +35,7 @@ test('confirmed level up accumulates percent, unconfirmed drop does not',()=>{
 });
 test('only persistent rune appearance notifies, and disappearance rearms',()=>{
  const s=createRuneState(),marker=found=>[{id:'rune_marker',found,mode:'scan'}];
- assert.equal(updateRune(s,marker(true),1000),false);assert.equal(updateRune(s,marker(true),1700),true);
+ assert.equal(updateRune(s,marker(true),1000),false);assert.equal(updateRune(s,marker(true),1500),true);
  assert.equal(updateRune(s,marker(true),3000),false);
  updateRune(s,marker(false),4000);updateRune(s,marker(false),14001);
  assert.equal(updateRune(s,marker(true),15000),false);assert.equal(updateRune(s,marker(true),15700),true);
@@ -86,7 +86,7 @@ test('game frame reads exp and fragment count',()=>{
  resetScreenMonitor();const F=prepareFrame(screenshot.rgba,screenshot.w,screenshot.h);
  const icon=MONITOR_REFERENCE.fragments_icon,hit=detect(F,{main:makeTemplate(icon.rgba,24,24,true),thr:.86,last:null});
  assert.equal(hit.found,true);
- let out;for(const t of [1000,1600,2200])out=analyzeScreen(F,[{id:'fragments_icon',...hit}],t);
+ let out;for(const t of [1000,6000])out=analyzeScreen(F,[{id:'fragments_icon',...hit}],t);
  assert.equal(out.exp.value.percent,28.693);assert.equal(out.exp.value.raw,'38003778803410');assert.equal(out.fragments.value,23);
 });
 test('actual minimap rune is found and removing it produces no false rune',()=>{
@@ -116,6 +116,18 @@ test('percent changes alone do not start hunting; unreadable percent does not bl
  observeExperience(m,{raw:'38003778803411',percent:null},2200);assert.equal(m.running,true);
  assert.equal(m.lastGainAt,2200);assert.equal(m.currentExp.raw,'38003778803411');
 });
+test('a missing start percent uses the first complete EXP reading and keeps it across OCR misses',()=>{
+ const m=createHuntModel();
+ observeExperience(m,{raw:'1400000000',percent:null},1000);
+ observeExperience(m,{raw:'1400000001',percent:null},1600);
+ assert.equal(m.startedAt,1600);
+ assert.equal(m.startExp.raw,'1400000001');
+ observeExperience(m,{raw:'1400000001',percent:79.9},2200);
+ assert.equal(m.startExp.percent,79.9);
+ observeExperience(m,{raw:'1400000010',percent:79.95},2800);
+ observeExperience(m,{raw:'1400000011',percent:null},3400);
+ assert.equal(finishHunt(m,4000).gainPercent,.05);
+});
 test('raw number parsing is independent of percent and rejects missing middle digits',()=>{
  assert.equal(parseExperience('38,003,778,803,410[??.?%]').raw,'38003778803410');
  assert.equal(parseExperience('38,003,778,803,410').percent,null);
@@ -126,9 +138,9 @@ test('actual screenshot raw-only frames start hunting and survive absent percent
  const pixels=screenshot.rgba.slice();
  for(let y=screenshot.h-11;y<screenshot.h-2;y++)for(let x=714;x<772;x++)pixels.set([20,20,20,255],(y*screenshot.w+x)*4);
  resetScreenMonitor();const first=prepareFrame(pixels,screenshot.w,screenshot.h);
- analyzeScreen(first,[],1000);const initial=analyzeScreen(first,[],1600).exp.value;
+ const initial=analyzeScreen(first,[],1000).exp.value;
  assert.equal(initial.raw,'38003778803410');assert.equal(initial.percent,null);
- const m=createHuntModel();observeExperience(m,initial,1600);
+ const m=createHuntModel();observeExperience(m,initial,1000);assert.equal(m.running,false);
  for(let y=screenshot.h-10;y<screenshot.h-4;y++)for(let x=705;x<710;x++)pixels.set([20,20,20,255],(y*screenshot.w+x)*4);
  for(let y=screenshot.h-10;y<screenshot.h-4;y++)for(let x=701;x<703;x++){const p=(y*screenshot.w+x)*4;pixels.set(screenshot.rgba.subarray(p,p+4),(y*screenshot.w+x+6)*4);}
  const next=analyzeScreen(prepareFrame(pixels,screenshot.w,screenshot.h),[],2200).exp.value;
@@ -143,6 +155,23 @@ test('cooldown classifier rejects the colored rune buff and accepts the gray ico
   assert.equal(detect(prepareFrame(rgba,96,80),t).found,expected);
  }
  const blank=readDigits(gray.rgba,32,{min:1,area:[.03,.56,.75,.97],dark:true});assert.equal(blank.seconds,null);
+});
+test('a yellow central countdown keeps a gray rune in the cooldown class at FHD scale',()=>{
+ const gray=resizeIcon(readPNG(new URL('../icon/hunting/rune-cooldown.png',import.meta.url)),45);
+ const blue=resizeIcon(readPNG(new URL('../icon/hunting/rune-normal.png',import.meta.url)),45);
+ const pixels=gray.rgba.slice();
+ for(let y=16;y<29;y++)for(let x=14;x<30;x++) {
+  if(x%4===0 || y%6===0) pixels.set([255,240,0,255],(y*45+x)*4);
+ }
+ const frame=prepareFrame(pixels,45,45),last={x:0,y:0};
+ const grayHit=detect(frame,{main:makeTemplate(gray.rgba,45,45,'cooldown'),colorMode:'gray',thr:.88,last});
+ assert.equal(grayHit.found,true);
+ assert.equal(detect(frame,{main:makeTemplate(blue.rgba,45,45),colorMode:'color',thr:.88,last}).found,false);
+ const state=createRuneState();
+ for(const now of [1000,1500])updateRune(state,[{id:'rune_normal',found:true,seconds:98,confidence:1,x:0,y:0}],now);
+ for(const now of [2000,2500])updateRune(state,[{...grayHit,id:'rune_cooldown',seconds:97,confidence:1}],now);
+ assert.equal(state.buffDeadline,0);
+ assert.equal(runePresentation(state,2500).seconds,97);
 });
 test('single rune presentation follows buff, cooldown, search, appearance',()=>{
  const s=createRuneState();s.buffKind='룬';s.buffSeen=1000;s.buffDeadline=10000;s.cooldownSeen=1000;s.cooldownDeadline=20000;
@@ -249,4 +278,41 @@ test('center strip reads a two-digit timer below gold icon decoration',()=>{
    if(bit==='1')pixels.set(yellow,((y+11)*size+10+index*6+x)*4);
  })));
  assert.equal(readDigits(pixels,size,{area:[.16,.31,.84,.69],min:1,aligned:true}).seconds,16);
+});
+
+test('rune marker survives intermittent misses and longest buff precedes cooldown',()=>{
+ const s=createRuneState();
+ const marker=found=>({id:'rune_marker',found,mode:'scan'});
+ updateRune(s,[marker(true)],1000);
+ updateRune(s,[marker(false)],2000);
+ assert.equal(runePresentation(s,8000).label,'룬이 나타났습니다');
+ updateRune(s,[marker(false)],8500);
+ assert.equal(runePresentation(s,8500).label,'룬 버프 탐색 중');
+ const reading=(id,seconds)=>({id,found:true,mode:'track',seconds,confidence:1});
+ for(const now of [9000,9500]) updateRune(s,[reading('rune_normal',30),reading('rune_blessed',219),reading('rune_cooldown',14)],now);
+ assert.equal(runePresentation(s,9500).seconds,219);
+ assert.equal(runePresentation(s,s.buffDeadline+1).label,'룬 재사용 대기');
+ assert.equal(runePresentation(s,s.cooldownDeadline+1).label,'미니맵 탐색 중');
+});
+
+test('a longer rune timer from the same template replaces a confirmed short effect',()=>{
+ const state=createRuneState();
+ const buff=(x,seconds)=>({id:'rune_normal',found:true,x,y:58,size:45,seconds,confidence:1});
+ for(const now of [1000,1500]) updateRune(state,[buff(1647,152)],now);
+ assert.equal(runePresentation(state,1500).seconds,152);
+ updateRune(state,[buff(1647,151),buff(1692,241)],2000);
+ updateRune(state,[buff(1647,150),buff(1692,240)],3000);
+ assert.equal(runePresentation(state,3000).seconds,240);
+});
+
+test('a confirmed minute rune timer rejects spurious short centered seconds',()=>{
+ const state=createRuneState();
+ const read=(seconds,unit)=>[{id:'rune_cooldown',found:true,seconds,unit,confidence:1}];
+ updateRune(state,read(14,'minutes'),1000);
+ updateRune(state,read(14,'minutes'),1500);
+ updateRune(state,read(11,'seconds'),2000);
+ updateRune(state,read(10,'seconds'),3000);
+ assert.equal(runePresentation(state,3000).seconds,839);
+ assert.equal(cooldownSeconds(10,null,'seconds').seconds,10);
+ assert.equal(cooldownSeconds(10,null,'minutes').seconds,600);
 });
