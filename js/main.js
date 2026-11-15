@@ -17,6 +17,14 @@ themeToggle.addEventListener('click', () => {
   try { localStorage.setItem('site-theme', root.dataset.theme); } catch {}
 });
 
+const ideaMessage = document.getElementById('ideaMessage');
+let ideaMessageTimer;
+document.getElementById('ideaButton').addEventListener('click', () => {
+  clearTimeout(ideaMessageTimer);
+  ideaMessage.textContent = '여기다가 뭐 만들지?';
+  ideaMessageTimer = setTimeout(() => { ideaMessage.textContent = ''; }, 3000);
+});
+
 const nav = document.getElementById('tabNav');
 const tabIndicator = document.createElement('span');
 tabIndicator.className = 'tab-indicator';

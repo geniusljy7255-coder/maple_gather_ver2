@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍁</text></svg>">
+<link rel="icon" type="image/png" href="icon/favicon.png">
 <title>땅캐라</title>
 <script>
   try {
@@ -48,13 +48,17 @@
 
 <div id="page">
 <header class="site-header">
-  <h1>땅캐라</h1>
+  <h1><span class="site-logo"><img src="icon/logo.png" width="1376" height="768" alt="땅캐라"></span></h1>
   <nav id="tabNav" role="tablist" aria-label="도구"></nav>
-  <button type="button" id="themeToggle" role="switch" aria-checked="false" aria-label="다크 모드">
-    <span class="theme-knob" aria-hidden="true"></span>
-    <span class="theme-symbol" aria-hidden="true">☀</span>
-    <span class="theme-symbol" aria-hidden="true">☾</span>
-  </button>
+  <div class="header-actions">
+    <button type="button" id="themeToggle" role="switch" aria-checked="false" aria-label="다크 모드">
+      <span class="theme-knob" aria-hidden="true"></span>
+      <span class="theme-symbol" aria-hidden="true">☀</span>
+      <span class="theme-symbol" aria-hidden="true">☾</span>
+    </button>
+    <button type="button" id="ideaButton" aria-label="아이디어">?</button>
+  </div>
+  <p id="ideaMessage" class="header-message" role="status"></p>
 </header>
 
 
