@@ -1,3 +1,4 @@
+import { getTimerFormat, setTimerFormat } from './detector.js';
 import { jobInstallers, jobSkill, jobIconFile, installerIcon } from './job-installers.js';
 import {runePresentation} from './rune-state.js';
 /* 사냥 도우미: 화면 구성 · 이벤트 연결 · 렌더링 */
@@ -110,7 +111,16 @@ export const html = `
 </div>
 
 <div class="panel">
-  <h2 class="panel-h"><span><span class="dot"></span>룬 · 설치기</span><button id="huntAddInstaller" class="${BTN_GHOST}">설치기 추가하기</button></h2>
+  <h2 class="panel-h"><span><span class="dot"></span>룬 · 설치기</span><div class="flex flex-wrap items-center justify-end gap-2">
+    <label class="flex items-center gap-1.5 text-xs text-slate-600">
+      <span>시간 표기</span>
+      <select id="huntTimerFormat" class="rounded-lg border border-slate-300 bg-white px-2 py-1.5 font-bold text-slate-800">
+        <option value="seconds">초</option>
+        <option value="clock">분:초</option>
+      </select>
+    </label>
+    <button id="huntAddInstaller" class="${BTN_GHOST}">설치기 추가하기</button>
+  </div></h2>
   <div id="huntInstallerGrid" class="grid gap-3 md:grid-cols-3">
     <div class="card space-y-2 text-center">
       <div class="label">${iconLabel("룬",installerIcon("rune-normal"))}</div>
@@ -401,6 +411,9 @@ async function togglePip() {
 }
 
 export function bind() {
+  const timerFormat = $('huntTimerFormat');
+  timerFormat.value = getTimerFormat();
+  timerFormat.addEventListener('change',event=>setTimerFormat(event.target.value));
   bindJobInstallers();
   $('huntPipBtn').addEventListener('click', togglePip);
   $('huntShareBtn').addEventListener('click', async () => {
@@ -494,7 +507,12 @@ function renderMeasurements(now){
   setText('huntExp', h.startExp
     ? gainedPercent ? '+'+h.gainPercent.toFixed(4)+'%p' : '+'+BigInt(h.gainRaw).toLocaleString('ko-KR')
     : h.lastExp?.raw ? '+0' : '경험치 인식 대기');
-  setText('huntExpDetail',(h.startExp?percent(h.startExp.percent)+' → '+percent(h.currentExp?.percent ?? lastPercent)+' · ':'')+'현재 경험치 '+(h.lastExp?.raw?BigInt(h.lastExp.raw).toLocaleString('ko-KR'):'숫자 인식 대기'));
+  const expDetails = [];
+  if (h.startExp?.raw) expDetails.push('시작 경험치 '+BigInt(h.startExp.raw).toLocaleString('ko-KR'));
+  expDetails.push('현재 경험치 '+(h.lastExp?.raw ? BigInt(h.lastExp.raw).toLocaleString('ko-KR') : '숫자 인식 대기'));
+  if (gainedPercent && h.startExp?.raw) expDetails.push('획득 경험치 +'+BigInt(h.gainRaw).toLocaleString('ko-KR'));
+  if (h.startExp) expDetails.push(percent(h.startExp.percent)+' → '+percent(h.currentExp?.percent ?? lastPercent));
+  setText('huntExpDetail',expDetails.join(' · '));
   const currentPercent = h.lastExp?.percent ?? lastPercent;
   const progress = $('huntExpProgress');
   const percentKnown = Number.isFinite(currentPercent);

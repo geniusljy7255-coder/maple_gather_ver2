@@ -1,25 +1,173 @@
 import {readScreenText,parseExperience} from './screen-text.js';
 let expJump=null, expLower=null, expBox=null,expPending=null,fragmentPending=null,fragmentConfirmed=null,lastRun=0,lastExpSuccess=0;
 export function resetScreenMonitor(){expJump=null;expLower=null;expBox=null;expPending=null;fragmentPending=null;fragmentConfirmed=null;lastRun=0;lastExpSuccess=0;}
+// Require every three-digit group even when the percent delimiter is damaged.
+const groupedExperienceRow = /^\s*(\d{1,3}(?:[,.]\d{3}){2,})(?=\s*\[|\s*$|\s*\??\s*(?:\d{1,2}[.,]\d{1,4}|\d{5})%\]?\s*$)/;
+function parseExperienceRow(text){
+  const value=parseExperience(text);
+  if (value?.raw && value.percent!==null) return value;
+  const grouped=text.match(groupedExperienceRow);
+  return grouped ? parseExperience(grouped[1]) : null;
+}
+function readEventExperience(F,box) {
+  const tones=['exp-event'];
+  for (const tone of tones) {
+    const reading=readScreenText(F,box,tone);
+    // A tiny decimal dot can disappear while all five percent digits survive.
+    const text=reading.text.replace(/^\s*,(?=\d{1,3}[,.]\d{3})/,'').replace(/\[(\d{2})(\d{3})%\]/,'[$1.$2%]');
+    const value=parseExperienceRow(text);
+    if (value?.raw) return {value,text,box};
+    if (tone==='exp-event' && /^\s*[0-9?,.]{8,}/.test(text)) {
+      tones.push('exp-event-dim','exp-event-bright');
+    }
+  }
+  return null;
+}
+function readClippedExperience(F,box) {
+  // The bottom pixel row carries the commas. Use the complete percent suffix
+  // to anchor the integer when only the top five rows are legible.
+  const parseClipped = reading => {
+    const text=reading.text.trim().replace(/\[(\d{1,2})(\d{3})%\]$/,'[$1.$2%]');
+    if (reading.confidence<.90 || !/^\d{7,18}\[\d{1,2}[.,]\d{3}%\]$/.test(text)) return null;
+    const value=parseExperience(text);
+    return value?.raw && value.percent!==null ? {value,text,box} : null;
+  };
+  const reading=readScreenText(F,box,box.tone);
+  const primary=parseClipped(reading);
+  if (primary || !/^\s*[\d?]{7,18}\[/.test(reading.text)) return primary;
+  const dim=parseClipped(readScreenText(F,box,'exp-event-clipped-dim'));
+  const bright=parseClipped(readScreenText(F,box,'exp-event-clipped-bright'));
+  return dim && bright && dim.text!==bright.text ? null : dim ?? bright;
+}
+function readScaledExperience(F,box) {
+  const {x,y,w,h,sampleHeight,scale,phase,verticalPhase}=box;
+  const sampleWidth=Math.floor(w/scale);
+  const rgba=new Uint8ClampedArray(sampleWidth*sampleHeight*4);
+  for(let row=0;row<sampleHeight;row++) {
+    const sy=y+Math.min(h-1,Math.floor((row+verticalPhase)*scale));
+    for(let col=0;col<sampleWidth;col++) {
+      const sx=x+Math.floor((col+phase)*scale);
+      const src=(sy*F.w+sx)*4,dst=(row*sampleWidth+col)*4;
+      rgba[dst]=F.rgba[src];rgba[dst+1]=F.rgba[src+1];rgba[dst+2]=F.rgba[src+2];
+    }
+  }
+  const sample={w:sampleWidth,h:sampleHeight,rgba};
+  const area={x:0,y:0,w:sampleWidth,h:sampleHeight};
+  const tones=sampleHeight<=7 ? ['exp-event'] : ['exp-overlay'];
+  for(const tone of tones) {
+    const reading=readScreenText(sample,area,tone);
+    const text=reading.text.trim().replace(/^,(?=\d{1,3}[,.]\d{3})/,'')
+      .replace(/\[(\d{1,2})(\d{3})%\]$/,'[$1.$2%]');
+    if (tones.length===1 && /^[\d?,.]{8,}\s*\[/.test(text)) {
+      tones.push(...(sampleHeight<=7 ? ['exp-event-dim','exp-event-bright'] : ['white','dim']));
+    }
+    if (!/^\d{1,3}(?:[,.]\d{3}){2,}\s*\[\d{1,2}[.,]\d{1,4}%?\]$/.test(text)) continue;
+    const value=parseExperience(text);
+    if (reading.confidence>=.84 && value?.raw && value.percent!==null) return {value,text,box};
+  }
+  return null;
+}
+function findScaledExperience(F) {
+  const w=Math.ceil(F.w*.24),x=Math.floor((F.w-w)/2);
+  const minY=Math.max(0,F.h-Math.max(32,Math.ceil((F.sourceHeight ?? F.h)*.08)));
+  let bottom=null,bands=0;
+  // Locate the text band by its repeated bright strokes. A title bar or
+  // capture border changes its position without changing the glyph height.
+  for(let y=F.h-1;y>=minY;y--) {
+    let runs=0,lit=0,last=false;
+    for(let col=x;col<x+w;col++) {
+      const i=(y*F.w+col)*4;
+      const bright=Math.min(F.rgba[i],F.rgba[i+1],F.rgba[i+2])>=105;
+      if(bright) {lit++;if(!last)runs++;}
+      last=bright;
+    }
+    const textRow=runs>=6 && lit<=w*.55;
+    if(textRow && bottom===null) bottom=y+1;
+    if(textRow || bottom===null) continue;
+    const h=bottom-y-1;
+    bottom=null;
+    if(h<6 || h>30) continue;
+    if(++bands>3) break;
+    for(const sampleHeight of [7,10]) {
+      const estimate=h/sampleHeight;
+      const rounded=Math.round(estimate*20)/20;
+      for(const scale of [rounded,rounded-.05,rounded+.05]) {
+        for(const verticalPhase of [.5,.1,.9]) {
+          for(const phase of [.5,.15,.85]) {
+            const result=readScaledExperience(F,{x,y:y+1,w,h,sampleHeight,scale,phase,verticalPhase});
+            if(result) return result;
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
 function experience(F){
-  if (expBox?.tone) {
+  if (expBox?.sampleHeight) {
+    const tracked=readScaledExperience(F,expBox);
+    if (tracked) return tracked;
+  } else if (expBox?.tone==='exp-event') {
+    const tracked=readEventExperience(F,expBox);
+    if (tracked) return tracked;
+  } else if (expBox?.tone==='exp-event-clipped') {
+    const tracked=readEventExperience(F,{...expBox,h:7,tone:'exp-event'}) ??
+      readClippedExperience(F,expBox);
+    if (tracked) {expBox=tracked.box;return tracked;}
+  } else if (expBox?.tone) {
     const reading = readScreenText(F, expBox, expBox.tone, expBox.mergeGaps);
-    const value = parseExperience(reading.text);
-    if (value?.raw && (value.percent !== null || value.raw.length === expPending?.raw.length)) {
+    const value = parseExperienceRow(reading.text);
+    if (value?.raw) {
       return {value,text:reading.text,box:expBox};
     }
   }
-  if (F.w >= 1600) {
+  if (F.w < 1600) {
+    const w=Math.ceil(F.w*.22),x=Math.floor((F.w-w)/2);
+    for (const offset of [4,3,2,1,5,0,6,7,8,9,10,11,12]) {
+      const event=readEventExperience(F,{x,y:F.h-offset-7,w,h:7,tone:'exp-event'});
+      if (event) {expBox=event.box;return event;}
+    }
+  }
+  {
     const w = Math.ceil(F.w*.2);
     const x = Math.floor((F.w-w)/2);
     for (const [offset,h] of [[3,10],[2,11],[3,11],[1,11],[4,11],[1,13],[2,13],[0,11],[0,13]]) {
-      for (const [tone,mergeGaps] of [['white',false],['dim',false],['white',true],['exp',false]]) {
-        const box = {x,y:F.h-offset-h,w,h,mergeGaps,tone};
-        const reading = readScreenText(F,box,tone,mergeGaps);
-        const value = parseExperience(reading.text);
-        if (value?.raw && (value.percent !== null || /\d{1,3}(?:[,.]\d{3}){2,}\s*\[/.test(reading.text))) {
+      for (const tone of (F.w >= 1600 ? ['white','dim','exp-overlay','exp'] : ['white','exp-overlay'])) {
+        const box = {x,y:F.h-offset-h,w,h,tone};
+        const reading = readScreenText(F,box,tone);
+        const value = parseExperienceRow(reading.text);
+        if (value?.raw) {
           expBox = box;
           return {value,text:reading.text,box};
+        }
+      }
+    }
+  }
+  const scaled=findScaledExperience(F);
+  if (scaled) {expBox=scaled.box;return scaled;}
+  if (F.w < 1600) {
+    const w=Math.ceil(F.w*.22),x=Math.floor((F.w-w)/2);
+    for (const offset of [4,3,2,1,5,0,6,7,8,9,10,11,12]) {
+      const clipped=readClippedExperience(F,{x,y:F.h-offset-7,w,h:5,tone:'exp-event-clipped'});
+      if (clipped) {expBox=clipped.box;return clipped;}
+    }
+  }
+  {
+    const w = Math.ceil(F.w*.18), x = Math.floor((F.w-w)/2);
+    // The title bar and thin window border change the bottom offset by a few pixels.
+    for (const offset of [2,3,1,4,5,0,6,7,8,9,10]) {
+      if (F.w >= 1600) {
+        const event = readEventExperience(F,{x,y:F.h-offset-7,w,h:7,tone:'exp-event'});
+        if (event) {expBox=event.box;return event;}
+      }
+      for (const h of (F.w < 1600 ? [7,8,6,9] : [10,11])) {
+        for (const tone of (F.w < 1600 ? ['white','dim','exp-window'] : ['exp-window'])) {
+          const box = {x,y:F.h-offset-h,w,h,tone};
+          const {text} = readScreenText(F,box,tone);
+          const value = parseExperienceRow(text);
+          if (!value?.raw) continue;
+          expBox = box;
+          return {value,text,box};
         }
       }
     }
@@ -58,6 +206,14 @@ function experience(F){
     if(longest<Math.min(140,F.w*.1))continue;
 
     const left = end - longest + 1;
+    if (longest>=550) {
+      const w=Math.min(240,longest),x=left+Math.floor((longest-w)/2);
+      for (const gap of [0,1,2,3]) {
+        const event=readEventExperience(F,{x,y:y-7-gap,w,h:7,tone:'exp-event'});
+        if (event) {expBox=event.box;return event;}
+      }
+    }
+
     for (const height of [7, 8, 9, 11, 13, 16]) {
       const x = Math.max(0, left);
       boxes.push({x,y:Math.max(0,y-height+1),w:F.w-x,h:height});
@@ -83,9 +239,9 @@ function experience(F){
   }
   return {value:null,text:bestText,reason:'경험치 숫자 전체를 읽지 못했습니다'};
 }
-export function analyzeScreen(F,results,now){
-  if(now-lastRun<500)return null;lastRun=now;
+export function analyzeExperience(F,now) {
   const exp=experience(F);
+  if (!exp) return null;
   if(exp.value){
     const current=exp.value,previous=expPending;
     const previousRaw=previous?.raw?BigInt(previous.raw):null,nextRaw=BigInt(current.raw);
@@ -110,10 +266,16 @@ export function analyzeScreen(F,results,now){
         // A damaged percent glyph must not suppress a plausible integer increase.
         if (!suspicious && percentRegressed) current.percent = null;
         if (suspicious) {
-          // A jump needs independent confirmation before becoming the baseline.
+          // Repeated OCR can repeat the same wrong digit. When the percent is
+          // available, a large integer gain should move it by a similar amount.
+          const percentAgrees=previousRaw===0n || previous.percent==null ||
+            previous.percent<.01 || current.percent==null ||
+            Math.abs(current.percent-previous.percent-
+              previous.percent*(Number(nextRaw-previousRaw)/Number(previousRaw)))<=.002;
           const agrees = expJump?.raw === current.raw && now-expJump.t <= 6500;
-          expJump = {raw:current.raw,t:now};
-          stable = Boolean(agrees && (current.percent == null || previous.percent == null || current.percent >= previous.percent));
+          expJump = percentAgrees ? {raw:current.raw,t:now} : null;
+          stable = Boolean(agrees && percentAgrees &&
+            (current.percent == null || previous.percent == null || current.percent >= previous.percent));
         } else expJump = null;
       }
       if (stable || previousRaw === null || (now-previous.t>6500 && nextRaw===previousRaw)) expPending = {...current,t:now};
@@ -130,6 +292,13 @@ export function analyzeScreen(F,results,now){
       exp.value=null;
     }
   }else if(now-lastExpSuccess>3000){expBox=null; expJump=null; expLower=null;}
+  return exp;
+}
+
+export function analyzeScreen(F,results,now,earlyExperience){
+  if(now-lastRun<500 && earlyExperience===undefined)return null;
+  lastRun=now;
+  const exp=earlyExperience===undefined ? analyzeExperience(F,now) : earlyExperience;
   const icon=results.find(r=>r.id==='fragments_icon'&&r.found);
   let fragments={value:null,text:'조각 UI 자동 탐색 중'};
   if(icon){
@@ -137,12 +306,16 @@ export function analyzeScreen(F,results,now){
     // 조각 아이콘 바로 아래 수량. UI 위치는 아이콘 탐색 결과로 결정.
     const box={x:icon.x-8*scale,y:icon.y+icon.size+5*scale,w:40*scale,h:10*scale};
     let reading;
-    // At FHD the count can sit directly above another overlay. Exclude its border.
-    if (icon.size >= 30) {
+    // Read the narrow count row before wider crops that can include game effects.
+    {
       for (const offset of [1,0,2,-1,3,-2]) {
-        const band = {x:icon.x-icon.size*.15,y:icon.y+icon.size*1.29+offset,w:icon.size*1.3,h:8};
-        const result = readScreenText(F,band,'fragment');
-        if (/^\d{1,6}$/.test(result.text) && result.confidence>=.83) {reading=result;break;}
+        const band = {x:icon.x-icon.size*.15,y:icon.y+icon.size*1.29+offset,w:icon.size*1.3,h:Math.max(6,Math.round(icon.size*.24))};
+        for (const tone of ['fragment','purple','dim']) {
+          const result = readScreenText(F,band,tone);
+          if (/^\d{1,6}$/.test(result.text) && result.confidence>=.83 &&
+              (!reading || result.confidence>reading.confidence)) reading=result;
+        }
+        if (reading?.confidence>=.97) break;
       }
     }
     for (const [offset, height] of [[0,10],[1,7],[2,7],[3,7],[-1,8],[-3,8],[4,8],[6,8]]) {
@@ -169,5 +342,5 @@ export function analyzeScreen(F,results,now){
       fragments={value:trusted?count:null,previous:firstIncrease?previous.value:null,text:reading.text,box};
     }
   }
-  return {exp,fragments};
+  return exp ? {exp,fragments} : {fragments};
 }

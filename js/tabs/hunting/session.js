@@ -74,7 +74,7 @@ export function handleMonitor(msg){
     if(msg.monitor.exp?.value){const running=state.hunt.running;if(!state.hunt.lastExp&&msg.monitor.exp.previous)observeExperience(state.hunt,msg.monitor.exp.previous,msg.monitor.exp.previous.t);observeExperience(state.hunt,msg.monitor.exp.value,msg.t);if(!running&&state.hunt.running)restartCollect(msg.t);}
     if(count!=null)observeFragments(state.hunt,count);
   }
-  if(updateRune(state.rune,msg.results,msg.t))notify('룬이 나타났습니다','alert','rune');
+  if(msg.type!=='experience-ready' && updateRune(state.rune,msg.results,msg.t))notify('룬이 나타났습니다','alert','rune');
 }
 export function captureEnded(){state.hunt.lastExp=null;state.hunt.fragmentBaseline=null;state.hunt.latestFragments=null;state.rune=createRuneState();state.vision.lastAt=0;state.vision.fragmentsReadAt=0;}
 export function tick(now=Date.now()){

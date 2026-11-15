@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {createHuntModel,beginHunt,finishHunt,observeExperience,observeFragments} from '../js/tabs/hunting/hunt-model.js';
 import {createRuneState,updateRune,cooldownSeconds,runePresentation} from '../js/tabs/hunting/rune-state.js';
 import {freshState,advance} from '../js/tabs/hunting/tracking-state.js';
-import {parseExperience} from '../js/tabs/hunting/screen-text.js';
-import {readDigits} from '../js/tabs/hunting/digits.js';
+import {parseExperience,readScreenText} from '../js/tabs/hunting/screen-text.js';
+import {applyTimerFormat,readDigits} from '../js/tabs/hunting/digits.js';
 import {BUILTIN} from '../js/data/builtin-icons.js';
 import {makeTemplate,resizeIcon,prepareFrame,detect} from '../js/tabs/hunting/matcher.js';
 const exp=(percent,level=288)=>({percent,level,raw:String(Math.round(percent*1000000000))});
@@ -89,6 +89,104 @@ test('game frame reads exp and fragment count',()=>{
  let out;for(const t of [1000,6000])out=analyzeScreen(F,[{id:'fragments_icon',...hit}],t);
  assert.equal(out.exp.value.percent,28.693);assert.equal(out.exp.value.raw,'38003778803410');assert.equal(out.fragments.value,23);
 });
+test('window capture reads the first EXP value with a tinted bar and bottom border',()=>{
+ const border=5, w=screenshot.w, h=screenshot.h+border;
+ const rgba=new Uint8ClampedArray(w*h*4);
+ rgba.set(screenshot.rgba);
+ for(let y=screenshot.h-11;y<screenshot.h-1;y++)for(let x=570;x<797;x++){
+  const p=(y*w+x)*4;
+  if(Math.min(...rgba.subarray(p,p+3))>155)rgba.set([155,137,129,255],p);
+  else if(x<690)rgba.set([141,38,34,255],p);
+  else rgba.set([50,139,38,255],p);
+ }
+ for(let y=screenshot.h;y<h;y++)for(let x=0;x<w;x++)rgba.set([165,165,165,255],(y*w+x)*4);
+ resetScreenMonitor();
+ const result=analyzeScreen(prepareFrame(rgba,w,h),[],1000);
+ assert.equal(result.exp.value?.raw,'38003778803410');
+});
+test('stationary EXP stays readable when the opening percent bracket disappears',()=>{
+ const {w,h}=screenshot;
+ const rgba=screenshot.rgba.slice();
+ for(let y=h-11;y<h-4;y++)for(let x=714;x<718;x++)rgba.set([20,20,20,255],(y*w+x)*4);
+ const frame=prepareFrame(rgba,w,h);
+ resetScreenMonitor();
+ for(const time of [1000,1600]){
+  const {exp}=analyzeScreen(frame,[],time);
+  assert.equal(exp.value?.raw,'38003778803410');
+  assert.equal(exp.value?.percent,null);
+ }
+});
+test('shared EXP is read when the bar color boundary widens a digit',()=>{
+ const strip=readPNG(new URL('./exp-color-boundary.png',import.meta.url));
+ const w=1368,h=80,rgba=new Uint8ClampedArray(w*h*4);
+ const left=Math.floor((w-strip.w)/2);
+ for(let y=0;y<strip.h;y++){
+  const row=y*strip.w*4;
+  rgba.set(strip.rgba.subarray(row,row+strip.w*4),((h-strip.h+y)*w+left)*4);
+ }
+ resetScreenMonitor();
+ const frame={w,h,sourceHeight:800,rgba};
+ for(const time of [1000,1750]){
+  const {exp}=analyzeScreen(frame,[],time);
+  assert.equal(exp.value?.raw,'61158328523525');
+  assert.equal(exp.value?.percent,46.174);
+ }
+});
+test('stationary EXP can be read above a window border that covers the bottom glyph row',()=>{
+ const {w,h}=screenshot;
+ const rgba=screenshot.rgba.slice();
+ for(let y=h-5;y<h;y++)for(let x=0;x<w;x++)rgba.set([245,223,0,255],(y*w+x)*4);
+ const frame=prepareFrame(rgba,w,h);
+ resetScreenMonitor();
+ for(const time of [1000,1600]){
+  const {exp}=analyzeScreen(frame,[],time);
+  assert.equal(exp.value?.raw,'38003778803410');
+  assert.equal(exp.value?.percent,28.693);
+  assert.equal(exp.box.tone,'exp-event-clipped');
+ }
+});
+test('stationary EXP is tracked across capture sizes and fractional text scaling',()=>{
+ for(const [w,h,scale,inset] of [[1366,768,1,26],[1600,900,1.25,34],[1920,1080,1.5,40],[2560,1440,2,46]]){
+  const rgba=new Uint8ClampedArray(w*h*4);
+  const bandWidth=Math.round(screenshot.w*.28*scale),bandHeight=Math.round(15*scale);
+  const left=Math.round(w/2-screenshot.w*.14*scale),top=h-inset-bandHeight;
+  for(let y=0;y<bandHeight;y++)for(let x=0;x<bandWidth;x++){
+   const srcX=Math.round(screenshot.w*.36)+Math.floor(x/scale);
+   const srcY=screenshot.h-15+Math.floor(y/scale);
+   const src=(srcY*screenshot.w+srcX)*4;
+   rgba.set(screenshot.rgba.subarray(src,src+4),((top+y)*w+left+x)*4);
+  }
+  const frame=prepareFrame(rgba,w,h);
+  resetScreenMonitor();
+  for(const time of [1000,1600]){
+   const {exp}=analyzeScreen(frame,[],time);
+   assert.equal(exp.value?.raw,'38003778803410',`${w} × ${h}`);
+   assert.equal(exp.value?.percent,28.693);
+  }
+ }
+});
+test('window EXP worker reads a cropped first frame after each share reconnect',async()=>{
+ const previousSelf=globalThis.self,previousPost=globalThis.postMessage;
+ const messages=[];
+ globalThis.self={};
+ globalThis.postMessage=message=>messages.push(message);
+ try {
+  await import('../js/tabs/hunting/experience.worker.js');
+  const {w,h:sourceHeight}=screenshot,h=80;
+  for(const [generation,t] of [[1,1000],[2,5000]]){
+   const buffer=screenshot.rgba.slice((sourceHeight-h)*w*4).buffer;
+   globalThis.self.onmessage({data:{generation,t,w,h,sourceHeight,buffer}});
+   const {monitor}=messages.at(-1);
+   assert.equal(monitor.exp.value.raw,'38003778803410');
+   assert.equal(monitor.exp.previous,undefined);
+   assert.equal(monitor.exp.box.y,785);
+   assert.equal(messages.at(-1).generation,generation);
+  }
+ } finally {
+  globalThis.self=previousSelf;
+  globalThis.postMessage=previousPost;
+ }
+});
 test('actual minimap rune is found and removing it produces no false rune',()=>{
  const frame=prepareFrame(screenshot.rgba,screenshot.w,screenshot.h);const r=detect(frame,markerTarget());
  assert.equal(r.found,true);
@@ -116,16 +214,19 @@ test('percent changes alone do not start hunting; unreadable percent does not bl
  observeExperience(m,{raw:'38003778803411',percent:null},2200);assert.equal(m.running,true);
  assert.equal(m.lastGainAt,2200);assert.equal(m.currentExp.raw,'38003778803411');
 });
-test('a missing start percent uses the first complete EXP reading and keeps it across OCR misses',()=>{
+test('a missing start percent preserves the first raw EXP and counts the first gain',()=>{
  const m=createHuntModel();
  observeExperience(m,{raw:'1400000000',percent:null},1000);
  observeExperience(m,{raw:'1400000001',percent:null},1600);
  assert.equal(m.startedAt,1600);
- assert.equal(m.startExp.raw,'1400000001');
+ assert.equal(m.startExp.raw,'1400000000');
+ assert.equal(m.gainRaw,'1');
  observeExperience(m,{raw:'1400000001',percent:79.9},2200);
  assert.equal(m.startExp.percent,79.9);
  observeExperience(m,{raw:'1400000010',percent:79.95},2800);
  observeExperience(m,{raw:'1400000011',percent:null},3400);
+ assert.equal(m.startExp.raw,'1400000000');
+ assert.equal(m.gainRaw,'11');
  assert.equal(finishHunt(m,4000).gainPercent,.05);
 });
 test('raw number parsing is independent of percent and rejects missing middle digits',()=>{
@@ -315,4 +416,126 @@ test('a confirmed minute rune timer rejects spurious short centered seconds',()=
  assert.equal(runePresentation(state,3000).seconds,839);
  assert.equal(cooldownSeconds(10,null,'seconds').seconds,10);
  assert.equal(cooldownSeconds(10,null,'minutes').seconds,600);
+});
+
+test('event bar OCR separates 6, 8, 3, 5 and 9 at seven pixels high',()=>{
+ const glyphs=[
+  ['01110','10001','10000','11110','10001','10001','01110'],
+  ['01110','10001','10001','01110','10001','10001','01110'],
+  ['01110','10001','00001','00110','00001','10001','01110'],
+  ['11111','10000','10000','01110','00001','10001','01110'],
+  ['01110','10001','10001','01111','00001','10001','01110']
+ ];
+ const w=glyphs.length*7,h=7,rgba=new Uint8ClampedArray(w*h*4);
+ for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+  const ink=glyphs[Math.floor(x/7)][y][x%7]==='1';
+  const faintNineStroke=x===32 && (y===1 || y===2);
+  rgba.set(ink ? [190,175,faintNineStroke?116:150,255] : [145,38,31,255],(y*w+x)*4);
+ }
+ assert.equal(readScreenText({w,h,rgba},{x:0,y:0,w,h},'exp-event').text,'68359');
+});
+
+test('event bar OCR recovers the faint upper-right stroke of 9 from the original pixels',()=>{
+ const five=['11111','10000','10000','01110','00001','10001','01110'];
+ const nine=['01110','10001','10001','01111','00001','10001','01110'];
+ const box={x:0,y:0,w:13,h:7};
+ const rgba=new Uint8ClampedArray(box.w*box.h*4);
+ for(let y=0;y<box.h;y++)for(let x=0;x<box.w;x++){
+  const ink=x<7 ? five[y][x]==='1' : nine[y][x-7]==='1';
+  let blue=ink ? 175 : 48;
+  if(x===7 && y===0) blue=145;
+  if(x===11 && (y===1||y===2)) blue=94;
+  rgba.set([Math.max(blue,145),Math.max(blue,90),blue,255],(y*box.w+x)*4);
+ }
+ assert.equal(readScreenText({...box,rgba},box,'exp-event').text,'59');
+ // The same brightness can come from the bar behind a 5. Its top bar still
+ // reaches the right edge, and neither digit should change.
+ for(let y=1;y<=2;y++)rgba.set([145,103,103,255],(y*box.w+4)*4);
+ assert.equal(readScreenText({...box,rgba},box,'exp-event').text,'59');
+});
+
+test('repeated high-digit OCR errors do not replace EXP when the percent stays fixed',()=>{
+ const {w,h}=screenshot;
+ const rgba=screenshot.rgba.slice();
+ resetScreenMonitor();
+ assert.equal(analyzeScreen(prepareFrame(rgba,w,h),[],1000).exp.value.raw,'38003778803410');
+ for(let y=786;y<=791;y++) {
+  const from=(y*w+743)*4;
+  rgba.set(screenshot.rgba.subarray(from,from+20),(y*w+633)*4);
+ }
+ const mistaken=prepareFrame(rgba,w,h);
+ for(const time of [1600,2200]){
+  const {exp}=analyzeScreen(mistaken,[],time);
+  assert.match(exp.text,/^38,009,778,803,410/);
+  assert.equal(exp.value,null);
+ }
+ assert.equal(analyzeScreen(prepareFrame(screenshot.rgba,w,h),[],2800).exp.value.raw,'38003778803410');
+ for(let y=786;y<=791;y++) {
+  const from=(y*w+726)*4;
+  rgba.set(screenshot.rgba.subarray(from,from+20),(y*w+750)*4);
+ }
+ const realGain=prepareFrame(rgba,w,h);
+ assert.equal(analyzeScreen(realGain,[],3400).exp.value,null);
+ assert.equal(analyzeScreen(realGain,[],4000).exp.value.raw,'38009778803410');
+});
+
+test('confirmed cooldown survives an untimed colored candidate and a five-second scan gap',()=>{
+ const state=createRuneState();
+ const read=seconds=>({id:'rune_cooldown',found:true,seconds,unit:'seconds',confidence:1});
+ updateRune(state,[read(375)],1000);
+ updateRune(state,[read(370)],6000);
+ updateRune(state,[{id:'rune_normal',found:true,seconds:null}],6500);
+ assert.equal(runePresentation(state,6500).label,'룬 재사용 대기');
+ assert.equal(runePresentation(state,6500).seconds,370);
+});
+
+test('countdown OCR converts minute and second notation without changing plain seconds',()=>{
+ const glyphs={
+  '0':['01110','10001','10011','10101','11001','10001','01110'],
+  '1':['00100','01100','00100','00100','00100','00100','01110'],
+  '3':['11110','00001','00001','01110','00001','00001','11110'],
+  '4':['00010','00110','01010','10010','11111','00010','00010'],
+  '5':['11111','10000','10000','11110','00001','00001','11110'],
+  '9':['01110','10001','10001','01111','00001','00001','01110'],
+  ':':['0','0','1','0','1','0','0']
+ };
+ function read(text,options,faintColon=false) {
+   const size=32,rgba=new Uint8ClampedArray(size*size*4);
+   let x=5;
+   for(const char of text) {
+     const glyph=glyphs[char];
+     for(const [y,row] of glyph.entries())for(const [dx,ink] of [...row].entries()) {
+       if(ink==='1') rgba.set(faintColon && char===':' ? [145,108,52,255] : [255,230,0,255],((y+12)*size+x+dx)*4);
+     }
+     x+=glyph[0].length+1;
+   }
+   return readDigits(rgba,size,options);
+ }
+ assert.equal(read('1:00').seconds,60);
+ const missedColon=read('1:05',undefined,true);
+ assert.equal(missedColon.seconds,105);
+ const inferred=applyTimerFormat(missedColon,'clock');
+ assert.equal(inferred.seconds,65);
+ assert.equal(applyTimerFormat(inferred,'clock').seconds,65);
+ assert.equal(applyTimerFormat({seconds:540},'clock').seconds,340);
+ assert.equal(applyTimerFormat({seconds:160},'clock').seconds,null);
+ assert.equal(applyTimerFormat(missedColon,'seconds').seconds,105);
+ const recovered=read('1:05',{clockOnly:true,faintYellow:true},true);
+ assert.equal(applyTimerFormat(recovered,'clock').seconds,65);
+ assert.equal(applyTimerFormat({seconds:59},'clock').seconds,59);
+ assert.equal(applyTimerFormat({seconds:14,unit:'minutes'},'clock').seconds,14);
+ assert.equal(read('1:19').seconds,79);
+ assert.equal(read('1:33').seconds,93);
+ assert.equal(read('5:40').seconds,340);
+ assert.equal(read('5:40').unit,'seconds');
+ assert.equal(read('540').seconds,540);
+ assert.equal(read('540',{clockOnly:true}).seconds,null);
+ assert.equal(read('5:40',{clockOnly:true}).seconds,340);
+ assert.equal(cooldownSeconds(14,null,'minutes').seconds,840);
+});
+
+test('experience parser accepts shorter character values next to the percent',()=>{
+ assert.equal(parseExperience('7,114,772[0.322%]').raw,'7114772');
+ assert.equal(parseExperience('114,772[0.322%]').raw,'114772');
+ assert.equal(parseExperience('114,772'),null);
 });

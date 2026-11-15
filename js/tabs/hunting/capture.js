@@ -85,10 +85,29 @@ function cleanup() {
 export function stopCapture() { if (stream) cleanup(); }
 
 const shot = document.createElement('canvas');
+const experienceShot = document.createElement('canvas');
+let experienceCtx = null;
 let shotCtx = null, grabError = '';
 
 /** 마지막으로 화면을 가져오지 못한 이유 (성공하면 빈 문자열) */
 export const getGrabError = () => grabError;
+
+export function grabExperienceFrame() {
+  if (!video || video.readyState<2 || !video.videoWidth || !video.videoHeight) return null;
+  const w=video.videoWidth,sourceHeight=video.videoHeight;
+  const h=Math.min(sourceHeight,Math.max(72,Math.ceil(sourceHeight*.10)));
+  try {
+    if (!experienceCtx || experienceShot.width!==w || experienceShot.height!==h) {
+      experienceShot.width=w;
+      experienceShot.height=h;
+      experienceCtx=experienceShot.getContext('2d',{willReadFrequently:true});
+    }
+    experienceCtx.drawImage(video,0,sourceHeight-h,w,h,0,0,w,h);
+    return {image:experienceCtx.getImageData(0,0,w,h),sourceHeight};
+  } catch {
+    return null;
+  }
+}
 
 /** 현재 화면 한 장을 ImageData로 가져온다. 실패하면 null이고, 이유는 getGrabError()로 확인한다. */
 export function grabFrame() {

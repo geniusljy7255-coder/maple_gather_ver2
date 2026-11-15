@@ -1,3 +1,4 @@
+import { RUNE_COOLDOWN_GLYPHS } from '../../data/screen-glyphs.js';
 import { BUILTIN } from '../../data/builtin-icons.js';
 /* 작은 노란 숫자 전용 판독. 낮은 점수/비슷한 후보는 읽지 않는다. */
 const LARGE_TIMER_GLYPHS = [[5,7,"000000000000000000000000000000000001111111111111111000001100000110000011100001111110000011100000110000011000011111111111111110000000000000000000000000000000000000000000"],[4,8,"000000000000000000000000000000000000000000001110000011100001111000011110000111100011111001101110011111101111111011111111000001100000011000000000000000000000000000000000000000000000000000000000"],[7,8,"000000000000000000000000000000000000000011111111011111110000011100000110000001100000110000001100000110000001100000110000001100000111000000100000000000000000000000000000000000000000000000000000"],[5,7,"000000000000000000000000000000000001111111111111111000001100000111000011100001111111000011100000110000011000011111111111111110000000000000000000000000000000000000000000"],[4,8,"000000000000000000000000000000000000000000001100000011100001111000011110001111100111011001101110011011101111111111111111000011100000011000000110000000000000000000000000000000000000000000000000"],[8,8,"000000000000000000000000000000000000000001111110111111111100001111000011110000111110111101111110111001111100001111000011111001111111111101111110000000000000000000000000000000000000000000000000"],[6,8,"000000000000000000000000000000000000000000111111011111111100000011000000110000001100000011111110111001111100001111000011110001111111111101111110000000000000000000000000000000000000000000000000"],[9,8,"000000000000000000000000000000000000000001111110111111111100001111000011110000111100001101111111000111110000001100000011000001110111111001111110000000000000000000000000000000000000000000000000"],[3,7,"000000000000000000000000000000000001111110111111100000110000011000011100001110111111000011100000110000011000011111111111111110000000000000000000000000000000000000000000"],[8,8,"000000000000000000000000000000000000000001111110111111111100001111000011111000111111011101111110111101111110001111000011111000111111111101111110000000000000000000000000000000000000000000000000"],[5,7,"000000000000000000000000000000000001111111111111111000001100000110000011100001111111000011100000110000011000011111111111111110000000000000000000000000000000000000000000"],[9,8,"000000000000000000000000000000000000000001111110111111111100001111000011110000111100001101111111000111110000001100000011000001110111111001111100000000000000000000000000000000000000000000000000"]];
@@ -67,6 +68,20 @@ export function getTemplates() {
   }
   return templates;
 }
+export function applyTimerFormat(reading,format) {
+  if (format==='clock' && !reading.clock && reading.unit!=='minutes' && reading.seconds>=60) {
+    const digits=reading.seconds;
+    const seconds=digits%100;
+    // This display mode uses M:SS below ten minutes and SS below one minute.
+    if (Number.isInteger(digits) && digits>=100 && digits<=959 && seconds<60) {
+      return {...reading,seconds:Math.floor(digits/100)*60+seconds,unit:'seconds',clock:true};
+    }
+    return {...reading,seconds:null,confidence:0,digit:'uncertain'};
+  }
+  return reading;
+}
+
+let runeCooldownTemplates;
 export function readDigits(rgba,size,options={}) {
   const mask=new Uint8Array(size*size);
   const area=options.area||[.125,.1875,.875,.8125];
@@ -74,7 +89,9 @@ export function readDigits(rgba,size,options={}) {
   let count=0;
   for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++) {
     const p=(y*size+x)*4,r=rgba[p],g=rgba[p+1],b=rgba[p+2];
-    const yellow = r>140 && g>115 && Math.min(r,g)-b>65 && g>r*.60;
+    const yellow = options.faintYellow
+      ? r>125 && g>100 && Math.min(r,g)-b>45 && g>r*.60
+      : r>140 && g>115 && Math.min(r,g)-b>65 && g>r*.60;
     const selected = options.dark
       ? Math.max(r,g,b)<105 && Math.max(r,g,b)-Math.min(r,g,b)<50
       : options.light
@@ -120,22 +137,41 @@ export function readDigits(rgba,size,options={}) {
     if(!n && start!==null) {runs.push([start,x]);start=null;}
   }
   const unknown={seconds:null,confidence:0,digit:count*(32/size)**2<=2?'absent':'uncertain'};
-  if(!runs.length || runs.length>3) return unknown;
+  if(!runs.length || runs.length>4 || (options.clockOnly && runs.length!==4)) return unknown;
+  const clockLayout=runs.length===4;
   let text='', confidence=1, firstBounds;
-  for(const [left,right] of runs) {
+  for(const [index,[left,right]] of runs.entries()) {
     const w=right-left,bits=new Uint8Array(w*size);
     let top=size,bottom=-1;
     for(let y=y0;y<y1;y++) for(let x=left;x<right;x++) if(mask[y*size+x]) {
       bits[y*w+x-left]=1; top=Math.min(top,y);bottom=Math.max(bottom,y);
     }
+    if (clockLayout && index===1) {
+      if (w>Math.ceil(size*.10) || !firstBounds ||
+          top<firstBounds.top || bottom>firstBounds.bottom || bottom-top>=firstBounds.bottom-firstBounds.top) return unknown;
+      let groups=0, previousRow=false;
+      for (let y=top;y<=bottom;y++) {
+        let lit=false;
+        for (let x=0;x<w;x++) lit ||= Boolean(bits[y*w+x]);
+        if (lit && !previousRow) groups++;
+        previousRow=lit;
+      }
+      if (groups!==2) return unknown;
+      text+=':';
+      continue;
+    }
     if(bottom-top+1<size*.18 || bottom-top+1>size*.55) return unknown;
-    if (options.aligned) {
+    if (options.aligned || clockLayout) {
       const tolerance = Math.max(1, Math.round(size * .08));
       if (firstBounds && (Math.abs(top-firstBounds.top)>tolerance || Math.abs(bottom-firstBounds.bottom)>tolerance)) return unknown;
-      firstBounds ??= {top,bottom};
     }
+    firstBounds ??= {top,bottom};
     const glyph=normalize(bits,w,size),scores=Array(10).fill(0);
-    const templates = options.goldTimer
+    const templates = options.runeCooldown || clockLayout
+      ? (runeCooldownTemplates ??= [...getTemplates(),...RUNE_COOLDOWN_GLYPHS.map(g=>({
+          digit:g.digit,...normalize(Uint8Array.from(g.bits,Number),g.w,g.h)
+        }))])
+      : options.goldTimer
       ? (goldTemplates ??= GOLD_GLYPHS.map(([digit,width,bits]) => ({
         digit,...normalize(Uint8Array.from(bits,Number),width,13)
       })))
@@ -151,7 +187,12 @@ export function readDigits(rgba,size,options={}) {
       scores[t.digit]=Math.max(scores[t.digit],score);
     }
     if (size >= 40 && Math.max(...scores) < .83) {
-      for (const t of getTemplates()) {
+      const fallback = clockLayout
+        ? (largeTemplates ??= LARGE_TIMER_GLYPHS.map(([digit,width,bits])=>({
+            digit,...normalize(Uint8Array.from(bits,Number),width,24)
+          })))
+        : getTemplates();
+      for (const t of fallback) {
         let intersection=0,total=0;
         for(let i=0;i<120;i++){intersection+=glyph.bits[i]&t.bits[i];total+=glyph.bits[i]+t.bits[i];}
         scores[t.digit]=Math.max(scores[t.digit],2*intersection/Math.max(1,total)-Math.abs(glyph.aspect-t.aspect)*.12);
@@ -160,6 +201,11 @@ export function readDigits(rgba,size,options={}) {
     const order=scores.map((score,digit)=>({score,digit})).sort((a,b)=>b.score-a.score);
     if(order[0].score<.83 || order[0].score-order[1].score<.055) return unknown;
     text+=order[0].digit; confidence=Math.min(confidence,order[0].score);
+  }
+  if (text.includes(':')) {
+    const clock=text.match(/^([1-9]):([0-5]\d)$/);
+    if (!clock) return unknown;
+    return {seconds:Number(clock[1])*60+Number(clock[2]),confidence,digit:'visible',unit:'seconds',clock:true};
   }
   const seconds=Number(text);
   if((text.length>1 && text[0]==='0') || seconds<(options.min??6) || seconds>999) return unknown;

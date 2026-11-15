@@ -36,9 +36,10 @@ async function configureJobInstallers() {
 /* 인식 결과 → 설치기 상태(없음 / 유지 중 / 곧 종료)로 바꾸고 알림을 낸다 */
 import { onTick } from '../../core/clock.js';
 import { notify } from '../../core/notify.js';
-import { getInfo, grabFrame, onCaptureChange } from './capture.js';
+import { getInfo, grabFrame, grabExperienceFrame, onCaptureChange } from './capture.js';
 import { TARGETS, getIcon, getThreshold, loadIcons, onIconsChange } from './icons.js';
-import { startDetector, configure, analyze, canAnalyze } from './detector.js';
+import { startDetector, configure, analyze, canAnalyze, startExperienceDetector, resetExperienceDetector,
+  hasExperienceDetector, canAnalyzeExperience, analyzeExperienceFrame } from './detector.js';
 
 import { freshState, advance } from './tracking-state.js';
 
@@ -69,6 +70,10 @@ export function expireInstallers(now) {
 
 export function handleResult(msg) {
   if (!getInfo().active) return;
+  if (msg.type==='experience-ready') {
+    handleMonitor(msg);
+    return;
+  }
   expireInstallers(msg.t);
   handleMonitor(msg);
   const lost = msg.results.some(r => trackers[r.id]?.deadline > msg.t &&
@@ -116,20 +121,30 @@ let retryAt = 0;
 let fastUntil = 0;
 let initialExpUntil = 0;
 let nextRecoveryAt = 0;
+let lastExperienceGrab = 0;
 function submitFrame(now) {
-  if (!getInfo().active || !canAnalyze(now)) return;
-  if (now < fastUntil || (now < initialExpUntil && (!sessionState.hunt.lastExp || sessionState.hunt.latestFragments === null))) {
+  const info=getInfo();
+  if (!info.active) return;
+  const externalExperience=info.surface==='window' && hasExperienceDetector();
+  const experienceInterval=sessionState.hunt.lastExp ? 1000 : 750;
+  if (externalExperience && now-lastExperienceGrab>=experienceInterval && canAnalyzeExperience()) {
+    const frame=grabExperienceFrame();
+    if (frame && analyzeExperienceFrame(frame,now)) lastExperienceGrab=now;
+  }
+  if (!canAnalyze(now)) return;
+  if (now < fastUntil || (now < initialExpUntil &&
+      ((!externalExperience && !sessionState.hunt.lastExp) || sessionState.hunt.latestFragments === null))) {
     if (now-lastGrab < 250) return;
     const img = grabFrame();
-    if (img && analyze(img,now)) {
+    if (img && analyze(img,now,null,externalExperience)) {
+      if (initialExpUntil===Infinity) initialExpUntil=now+8000;
       lastGrab=now;
       burstFrames=0;
       retryAt=now+refreshMs;
     }
     return;
   }
-  // Check all recovering installers on the same frame. Experience, runes
-  // and active timers keep their normal refresh schedule.
+  // Check all recovering installers on the same frame.
   if (!burstFrames && now < retryAt) {
     const waiting = Object.values(trackers).filter(tr => tr.needsReinstall ||
       (tr.deadline === null && tr.recoveryUntil > now));
@@ -144,7 +159,7 @@ function submitFrame(now) {
   }
   if (!burstFrames || now - lastGrab < confirmationMs) return;
   const img = grabFrame();
-  if (img && analyze(img, now)) {
+  if (img && analyze(img,now,null,externalExperience)) {
     lastGrab = now;
     if (--burstFrames === 0) retryAt = burstStartedAt + refreshMs;
   }
@@ -154,17 +169,23 @@ export async function initTracking() {
     handleResult(result);
     submitFrame(Date.now());
   });
+  startExperienceDetector();
   onIconsChange(pushConfig);
   onCaptureChange(info => {
-    fastUntil = info.active ? Date.now()+4000 : 0;
-    initialExpUntil = info.active ? Date.now()+8000 : 0;
+    const now=Date.now();
+    fastUntil = info.active ? now+4000 : 0;
+    // Keep the startup window available until the browser delivers a frame.
+    initialExpUntil = info.active ? Infinity : 0;
     nextRecoveryAt = fastUntil+5000;
     burstFrames = 0;
     retryAt = 0;
     lastGrab = 0;
+    lastExperienceGrab = 0;
+    resetExperienceDetector();
     if (!info.active) captureEnded();
     resetTrackers();
     pushConfig();
+    if (info.active) submitFrame(now);
   });
   onJobInstallersChange(configureJobInstallers);
   await loadIcons();

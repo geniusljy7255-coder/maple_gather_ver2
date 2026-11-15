@@ -1,7 +1,8 @@
+import { WINDOW_RUNE_COOLDOWN } from '../../data/monitor-reference.js';
 /* 크기별 전체 탐색은 순환 실행하고, 발견한 크기와 위치는 매 프레임 추적한다. */
 import { makeTemplate, prepareFrame, detect, resizeIcon } from './matcher.js';
-import { readDigits } from './digits.js';
-import { analyzeScreen, resetScreenMonitor } from './screen-monitor.js';
+import { applyTimerFormat, readDigits } from './digits.js';
+import { analyzeExperience, analyzeScreen, resetScreenMonitor } from './screen-monitor.js';
 
 const SIZES = [32, 45, 44, 24, 28, 20, 26, 30, 22, 18, 16, 34, 36, 40, 48, 64];
 // Keep the common sizes first, then cover intermediate UI scales.
@@ -10,6 +11,7 @@ const INSTALLER_SIZES = [...new Set([
 ])];
 let targets = [], generation = 0, dimensions = '', scanCursor = 0, localCursor = 0;
 let experienceBox = null;
+const isLara = target => target.file?.startsWith('라라_');
 const isInstaller = target => target.id === "janus" || target.id === "fountain" || target.id.startsWith("job-");
 const isCaptainBomber = target => target.file?.startsWith('캡틴_');
 const tpl = (img,whole=false) => makeTemplate(img.rgba, img.w, img.h,whole);
@@ -20,8 +22,25 @@ function cropFrame(frame, x, y, w, h) {
     const start = ((y + row) * frame.w + x) * 4;
     pixels.set(frame.rgba.subarray(start, start + w * 4), row * w * 4);
   }
-  return { frame: prepareFrame(pixels, w, h), x, y };
+  const crop=prepareFrame(pixels,w,h);
+  crop.timerFormat=frame.timerFormat;
+  return {frame:crop,x,y};
 }
+
+function trackInCrop(frame,variant,radius,variantAt) {
+  const {x,y}=variant.last;
+  const left=Math.max(0,x-radius),top=Math.max(0,y-radius);
+  const right=Math.min(frame.w,x+variant.main.w+radius);
+  const bottom=Math.min(frame.h,y+variant.main.h+radius);
+  const region=cropFrame(frame,left,top,right-left,bottom-top);
+  const tracked={...variantAt(variant,region),last:{x:x-left,y:y-top}};
+  const result=detect(region.frame,tracked,{allowScan:false,trackRadius:radius});
+  result.x+=left;
+  result.y+=top;
+  return result;
+}
+
+const windowCooldown = makeTemplate(WINDOW_RUNE_COOLDOWN.rgba,32,32,true);
 
 const isBuff = target => target.id !== 'rune_marker' && target.id !== 'fragments_icon';
 
@@ -32,7 +51,7 @@ self.onmessage = ({ data }) => {
       targets = data.targets.map(t => ({
         id: t.id, file: t.file, cursor: 0, localSize: 0, locked: null, misses: 0,
         variants: [...new Set([t.main.w, ...(isInstaller(t) ? INSTALLER_SIZES : t.sizes || SIZES)])].map(size => ({
-          thr: isInstaller(t) && size >= 40 && size !== t.main.w ? t.thr-.045 : t.thr, colorMode:t.colorMode, marker: !!t.marker, main: tpl(resizeIcon(t.fhd && size >= 15 ? t.fhd : t.main, size),t.whole),
+          thr: isInstaller(t) && size >= 40 && size !== t.main.w ? t.thr-.045 : t.thr, colorMode:t.colorMode, marker: !!t.marker, main: tpl(resizeIcon(t.fhd && size >= 15 ? t.fhd : t.main, size),isLara(t) ? 'wide-timer' : t.whole),
           reject: t.reject ? tpl(resizeIcon(t.reject, size)) : null, last: null
         }))
       }));
@@ -53,6 +72,18 @@ self.onmessage = ({ data }) => {
       dimensions = dims;resetScreenMonitor(); experienceBox = null;
     }
     const F = prepareFrame(new Uint8ClampedArray(data.buffer), data.w, data.h);
+    if (data.externalExperience) {
+      const box=data.experienceBox;
+      experienceBox=box?.sourceWidth===F.w && box.sourceHeight===F.h ? box : null;
+    }
+    const firstExperience = !data.targetIds && !experienceBox && !data.externalExperience
+      ? analyzeExperience(F,data.t)
+      : undefined;
+    if (firstExperience?.value) {
+      experienceBox=firstExperience.box;
+      postMessage({type:'experience-ready',generation,t:data.t,results:[],monitor:{exp:firstExperience}});
+    }
+    F.timerFormat=data.timerFormat;
     const selected = data.targetIds ? targets.filter(t => data.targetIds.includes(t.id)) : targets;
     const searching = selected.filter(t => t.locked === null);
     const nearbyTargets = searching.filter(isBuff);
@@ -86,6 +117,10 @@ self.onmessage = ({ data }) => {
     const searchesHud = t => (['janus','fountain'].includes(t.id) || isCaptainBomber(t)) &&
       (t.locked === null || t.misses > 0 || t.variants[t.locked].last?.y < F.h*.5);
     const hud = selected.some(searchesHud) ? cropFrame(F,hudX,hudY,Math.ceil(F.w*.38),F.h-hudY) : null;
+    const lara = selected.find(t=>isLara(t) && t.locked===null);
+    const jobBuffX = Math.floor(F.w*.65);
+    const jobBuffHud = lara ? cropFrame(F,jobBuffX,0,F.w-jobBuffX,Math.ceil(F.h*.21)) : null;
+    const laraInstallerHud = lara && (hud ?? cropFrame(F,hudX,hudY,Math.ceil(F.w*.38),F.h-hudY));
     const runeTypes = ['rune_normal','rune_blessed','rune_cooldown'];
     const runeX = Math.floor(F.w*.53);
     const runeHud = selected.some(t => runeTypes.includes(t.id) && t.locked === null)
@@ -102,8 +137,28 @@ self.onmessage = ({ data }) => {
       const variantAt = (variant, region) => t.id.startsWith('job-')
         ? {...variant,acceptPosition:(x,y,size)=>inBuffArea(x+(region?.x ?? 0),y+(region?.y ?? 0),size)}
         : variant;
+      if (jobBuffHud && t===lara) {
+        const sizes = F.w>=1800 ? [45,44,32] : [32,31,33,30,34];
+        for (const region of [jobBuffHud,laraInstallerHud]) {
+          for (const size of sizes) {
+            const index=t.variants.findIndex(v=>v.main.w===size);
+            if (index<0) continue;
+            const variant=t.variants[index];
+            const hit=detect(region.frame,{
+              ...variantAt(variant,region),last:null,thr:.76,scanOptions:{coarseMin:.37,maxCands:24}
+            });
+            if (!hit.found || (hit.score<variant.thr && hit.seconds===null)) continue;
+            hit.x+=region.x;
+            hit.y+=region.y;
+            variant.last={x:hit.x,y:hit.y};
+            t.locked=index;
+            t.misses=0;
+            return {id:t.id,...hit};
+          }
+        }
+      }
       if (fragmentsHud && t.id === 'fragments_icon') {
-        const sizes = F.w >= 1800 ? [34,33,32,35,36,24] : [24,23,25,26,32,34];
+        const sizes = F.w >= 1800 ? [34,33,32,35,36,24] : [24,23,25,26,27,28,30,32,34];
         for (const size of sizes) {
           const index = t.variants.findIndex(v=>v.main.w===size);
           if (index<0) continue;
@@ -179,7 +234,7 @@ self.onmessage = ({ data }) => {
       }
       if (t.locked !== null) {
         const v = t.variants[t.locked];
-        r = detect(F, variantAt(v), { allowScan: false, trackRadius: isInstaller(t) && t.misses ? 8 : 3 });
+        r = trackInCrop(F,v,isInstaller(t) && t.misses ? 8 : 3,variantAt);
         if (r.found) { t.misses = 0; v.last = { x: r.x, y: r.y }; return { id: t.id, ...r }; }
         if (t.id === 'rune_marker') {
           const marker = detect(markerHud.frame,{...v,last:null});
@@ -189,7 +244,7 @@ self.onmessage = ({ data }) => {
           }
           if (marker.found) return {id:t.id,...marker};
         }
-        if (++t.misses < (t.id === 'rune_marker' || runeTypes.includes(t.id) || isCaptainBomber(t) ? 1 : 3)) return { id: t.id, ...r };
+        if (++t.misses < (t.id === 'rune_marker' || t.id === 'fragments_icon' || runeTypes.includes(t.id) || isCaptainBomber(t) || isLara(t) ? 1 : 3)) return { id: t.id, ...r };
         v.last = null;
         t.cursor = t.locked;
         t.locked = null;
@@ -260,24 +315,50 @@ self.onmessage = ({ data }) => {
       if (alternate.found) bomberAlternates.push({id:result.id,...alternate,x:alternate.x+x,y:alternate.y+y});
     }
     for (const result of [...results,...bomberAlternates]) {
-      if (!result.id.startsWith('job-') || !result.found) continue;
+      if (!result.id.startsWith('job-') || !result.found || result.unit==='seconds') continue;
       const target = targets.find(item => item.id === result.id);
       const background = target?.variants[target.locked]?.main.rgba;
       if (!background) continue;
-      // Prefer the centered countdown strip, above which some icons have
-      // a gold border. Try the strip without subtraction too: yellow art
-      // underneath a real digit can otherwise erase part of its stroke.
+      // All registered skills use the same countdown OCR. Keep the full
+      // width so three digits or a clock can extend past the central strip.
+      const wide={area:[.02,.27,1,.77],min:1,aligned:true};
+      const strip={...wide,area:[.045,.34,.97,.71]};
+      const clock={...wide,clockOnly:true};
+      const passes=[
+        {...clock,background},clock,
+        {...clock,faintYellow:true,background},
+        {...wide,background},wide,
+        {...strip,background},strip,
+        {...strip,background,faintYellow:true,runeCooldown:true},
+        {...strip,faintYellow:true,runeCooldown:true},
+        {...wide,background,light:true}
+      ];
+      let shared;
+      for (const options of passes) {
+        const reading=applyTimerFormat(readDigits(result.preview,result.size,options),F.timerFormat);
+        if (reading.seconds===null) continue;
+        if (reading.clock || reading.seconds>=100 || reading.confidence>=.90) {
+          shared=reading;
+          break;
+        }
+        if (!shared || reading.confidence>shared.confidence) shared=reading;
+      }
+      if (shared && (shared.clock || shared.seconds>=100 || shared.confidence>=.90)) {
+        Object.assign(result,shared);
+        continue;
+      }
+
+      // Gold skill art can touch the numbers. A narrower crop remains a
+      // fallback for those icons when the shared pass is uncertain.
       const center = [.16,.31,.84,.69];
       if (isCaptainBomber(target)) {
-        // The golden artwork touches the digits outside this central strip.
-        const areas = [[.29,.36,.71,.66],[.27,.38,.73,.70]];
-        for (const area of areas) {
-          const timer = readDigits(result.preview,result.size,{area,min:1,aligned:true});
-          if (timer.seconds === null) continue;
+        for (const area of [[.29,.36,.71,.66],[.27,.38,.73,.70]]) {
+          const timer=applyTimerFormat(readDigits(result.preview,result.size,{area,min:1,aligned:true}),F.timerFormat);
+          if (timer.seconds===null) continue;
           Object.assign(result,timer);
           break;
         }
-        if (result.seconds !== null) continue;
+        if (result.seconds!==null) continue;
       }
       const goldArt = target.file?.includes('칼리_데스_블로섬');
       let reading = goldArt ? readDigits(result.preview,result.size,{
@@ -304,8 +385,9 @@ self.onmessage = ({ data }) => {
         const normalized = resizeIcon({rgba:result.preview,w:result.size,h:result.size},32);
         reading = readDigits(normalized.rgba,32,{area:[.10,.28,.90,.76],min:1,aligned:true});
       }
-      // Keep a valid unmasked reading when the overlay shares the base art's color.
-      if (reading.seconds !== null || result.seconds === null) Object.assign(result,reading);
+      // Keep the shared reading if the narrower passes found no timer.
+      if (reading.seconds!==null) Object.assign(result,reading);
+      else if (shared) Object.assign(result,shared);
     }
     for (const result of results) {
       if (!result.found || result.seconds !== null || result.size < 40 ||
@@ -351,10 +433,35 @@ self.onmessage = ({ data }) => {
         }
       }
     }
+    for (const result of [...results,...bomberAlternates]) {
+      Object.assign(result,applyTimerFormat(result,F.timerFormat));
+    }
     for (const alternate of bomberAlternates) {
       const primary = results.find(result => result.id === alternate.id);
       if (alternate.seconds !== null && (primary.seconds === null || alternate.seconds < primary.seconds)) {
         Object.assign(primary,alternate);
+      }
+    }
+    // A gray icon can pick up a blue fringe from the HUD or the scene.
+    // Compare the gray template at each colored candidate before trusting its timer.
+    const grayTarget = selected.find(t=>t.id==='rune_cooldown');
+    if (grayTarget) {
+      const gray = results.find(r=>r.id==='rune_cooldown');
+      if (runeHud && !gray.found) {
+        const known = detect(runeHud.frame,{main:windowCooldown,thr:.90,scanOptions:{coarseMin:.38,maxCands:24}});
+        if (known.found && known.color>=.90) {
+          Object.assign(gray,known,{x:known.x+runeHud.x,y:known.y+runeHud.y,chroma:{grayTemplate:true}});
+        }
+      }
+      for (const buff of results) {
+        if (!buff.found || !runeBuffIds.includes(buff.id)) continue;
+        const variant = grayTarget.variants.find(v=>v.main.w===buff.size);
+        if (!variant) continue;
+        const hit = detect(F,{...variant,colorMode:null,last:{x:buff.x,y:buff.y},thr:.90},
+          {allowScan:false,trackRadius:2});
+        if (!hit.found || hit.score < buff.score+.025 || hit.color < .91) continue;
+        if (!gray.found || hit.score>gray.score) Object.assign(gray,hit,{chroma:{grayTemplate:true}});
+        Object.assign(buff,{found:false,identity:false,seconds:null});
       }
     }
     for(const r of results)if(r.id==='rune_cooldown'&&r.found){
@@ -369,6 +476,12 @@ self.onmessage = ({ data }) => {
           target.locked=null;
         }
       }
+      if (r.unit==='seconds') continue;
+      const clock=readDigits(r.preview,r.size,{area:[.02,.27,1,.76],aligned:true,runeCooldown:true,clockOnly:true});
+      if (clock.unit==='seconds') {
+        Object.assign(r,clock);
+        continue;
+      }
       // The minute label is white and confined to the lower-left slot.
       const minuteArea=[.02,.65,.58,1];
       const minuteOptions={min:10,area:minuteArea,light:true,aligned:true};
@@ -380,15 +493,18 @@ self.onmessage = ({ data }) => {
         Object.assign(r,minute,{unit:'minutes'});
         continue;
       }
-      const secondsOptions={min:1,area:[.10,.25,.90,.75],aligned:true};
+      const secondsOptions={min:1,area:[.08,.34,.92,.68],runeCooldown:true};
       const nativeSeconds=readDigits(r.preview,r.size,secondsOptions);
       const seconds=nativeSeconds.seconds!==null && nativeSeconds.confidence>=.83
         ? nativeSeconds : readDigits(icon.rgba,32,secondsOptions);
-      Object.assign(r,seconds,{unit:'seconds'});
-
+      const fallback = seconds.seconds === null
+        ? readDigits(r.preview,r.size,{min:1,area:[.10,.25,.90,.75],aligned:true})
+        : seconds;
+      Object.assign(r,applyTimerFormat({...fallback,unit:'seconds'},F.timerFormat));
     }
-    const monitor=data.targetIds ? null : analyzeScreen(F,results,data.t);
-    if (monitor?.exp.box) {
+    const monitor=data.targetIds ? null : analyzeScreen(F,results,data.t,
+      data.externalExperience || firstExperience?.value ? null : firstExperience);
+    if (monitor?.exp?.value && monitor.exp.box) {
       if (!experienceBox) {
         for (const target of targets.filter(isInstaller)) target.localSize = target.cursor % target.variants.length;
       }

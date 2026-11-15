@@ -19,6 +19,6 @@ export async function loadMonitorAssets(){
     }catch{missing.push(file);}
   }
   assets.push({id:'rune_marker',marker:true,fhd:FHD_RUNE_MARKER,main:MONITOR_REFERENCE.rune_marker,thr:.85,whole:true,sizes:[12,17,16,18,14,10,15,19,20,22,24]});
-  assets.push({id:'fragments_icon',main:MONITOR_REFERENCE.fragments_icon,thr:.83,whole:true,sizes:[24,34,32,33,35,36,20,23,25,26,28,30,38,40,44,48]});
+  assets.push({id:'fragments_icon',main:MONITOR_REFERENCE.fragments_icon,thr:.83,whole:true,sizes:[24,34,32,33,35,36,20,23,25,26,27,28,30,38,40,44,48]});
   return {targets:assets,missing};
 }

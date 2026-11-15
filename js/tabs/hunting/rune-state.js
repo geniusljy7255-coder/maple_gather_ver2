@@ -8,8 +8,8 @@ export function cooldownSeconds(value,mode,unit){
   return value>=10&&value<=15&&(unit==='minutes'||(!unit&&mode!=='seconds'))?{seconds:value*60,approx:true,mode:'minutes'}:
     {seconds:value,approx:false,mode:'seconds'};
 }
-function confirm(samples,n,now,minutes=false){
-  samples.push({n,t:now});while(samples.length&&now-samples[0].t>2500)samples.shift();
+function confirm(samples,n,now,minutes=false,windowMs=2500){
+  samples.push({n,t:now});while(samples.length&&now-samples[0].t>windowMs)samples.shift();
   if(samples.length>8)samples.shift();
   const recent=samples.slice(-3);
   return recent.length>=2&&recent.every(s=>minutes?s.n===n:Math.abs(s.t+s.n*1000-now-n*1000)<=1500);
@@ -84,7 +84,7 @@ export function updateRune(s,results,now){
       if (!n.approx && s.cooldownMode==='minutes' && predicted>0 &&
           (n.seconds>599 || n.seconds<predicted-65)) continue;
       if (s.cooldownMode==='seconds' && predicted>0 && n.approx) continue;
-      if(!confirm(s.cooldownSamples,n.seconds,now,n.approx))continue;
+      if(!confirm(s.cooldownSamples,n.seconds,now,n.approx,6500))continue;
       // 분 숫자가 그대로인 동안 매 프레임 만료 시점을 뒤로 밀지 않는다.
       if(n.approx&&s.lastMinute===r.seconds&&s.cooldownMode==='minutes')continue;
       if(s.cooldownMode==='seconds'&&predicted>0&&Math.abs(predicted-n.seconds)>3)continue;
@@ -96,9 +96,9 @@ export function updateRune(s,results,now){
 }
 export function runePresentation(s,now){
   if(s.buffDeadline>now)return {label:'룬 버프 적용 중',seconds:Math.ceil((s.buffDeadline-now)/1000),approx:now-s.buffSeen>5000};
-  if(s.buffSeen&&now-s.buffSeen<5000&&!s.buffDeadline)return {label:'룬 버프 적용 중',seconds:null,detail:'남은 시간 확인 중'};
   if(s.cooldownDeadline>now)return {label:'룬 재사용 대기',seconds:Math.ceil((s.cooldownDeadline-now)/1000),approx:s.cooldownApprox||now-s.cooldownSeen>5000};
   if(s.cooldownSeen&&now-s.cooldownSeen<6500&&(!s.cooldownDeadline||s.cooldownSeen>s.cooldownDeadline))return {label:'룬 재사용 대기',seconds:null,detail:'남은 시간 확인 중'};
+  if(s.buffSeen&&now-s.buffSeen<5000&&!s.buffDeadline)return {label:'룬 버프 적용 중',seconds:null,detail:'남은 시간 확인 중'};
   if(s.markerPresent || (s.markerSeen&&now-s.markerSeen<5000))return {label:'룬이 나타났습니다',seconds:null};
   if(s.awaitingBuff)return {label:'룬 버프 탐색 중',seconds:null};
   return {label:'미니맵 탐색 중',seconds:null,detail:s.cooldownDeadline ? '마지막 확인 · 재사용 대기 종료' : s.buffDeadline ? '마지막 확인 · 룬 버프 종료' : s.markerSeen ? '마지막 확인 · 룬 출현' : ''};

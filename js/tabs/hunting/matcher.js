@@ -1,4 +1,4 @@
-import { readDigits } from './digits.js';
+import { applyTimerFormat, readDigits } from './digits.js';
 /* 아이콘 찾기 알고리즘 (DOM 없이 동작 → Worker와 테스트에서 공통 사용)
  *
  * - 밝기와 무관하게 "모양"만 비교한다 (ZNCC: 영점 정규화 상관). 아이콘은 시간이 지나면 흐려지기 때문.
@@ -46,8 +46,8 @@ function integral(g, w, h) {
 /* ---------- 템플릿 ---------- */
 /** 가운데 절반(숫자 자리)을 뺀 링 모양 마스크 템플릿 */
 export function makeTemplateGray(g, w, h, valid = null, whole = false) {
-  const full=whole===true,cooldown=whole==='cooldown';
-  const x0=full||cooldown?0:Math.floor(w/8),x1=full?0:cooldown?Math.ceil(w*.75):w-x0,
+  const full=whole===true,cooldown=whole==='cooldown',wideTimer=whole==='wide-timer';
+  const x0=full||cooldown||wideTimer?0:Math.floor(w/8),x1=full?0:cooldown?Math.ceil(w*.75):w-x0,
     y0=full?0:cooldown?Math.floor(h*.25):Math.floor(h/4),y1=full?0:cooldown?h:Math.ceil(h*.72);
   const dx = [], dy = [], val = [], exx = [], exy = [];
   for (let y = 0; y < h; y++) {
@@ -166,8 +166,8 @@ function coarse(H2, tc, minScore, maxCands) {
 /* ---------- 프레임 단위 분석 ---------- */
 /** 한 프레임에서 공통으로 쓰는 준비물(회색조, 절반 해상도, 합계 이미지)을 만든다 */
 export function prepareFrame(rgba, w, h) {
-  const G = toGray(rgba, w, h);
-  return { rgba, w, h, G, _half: null };
+  let gray;
+  return { rgba, w, h, get G() { return gray ??= toGray(rgba,w,h); }, _half: null };
 }
 function half2(F) {
   if (!F._half) {
@@ -337,8 +337,29 @@ function done(F, c, mode, rejected, main) {
     const offset = ((c.y + y) * F.w + c.x) * 4;
     preview.set(F.rgba.subarray(offset, offset + size * 4), y * size * 4);
   }
+  let reading;
+  if (F.timerFormat!=='clock') reading=readDigits(preview,size);
+  if (!reading || reading.seconds===null) {
+    for (const options of [
+      {area:[.02,.24,1,.79]},
+      {area:[.02,.36,1,.69]},
+      {area:[.02,.31,1,.73],faintYellow:true}
+    ]) {
+      if (options.faintYellow && F.timerFormat!=='clock') continue;
+      const clock=readDigits(preview,size,{...options,clockOnly:true});
+      if (clock.unit!=='seconds') continue;
+      reading=clock;
+      break;
+    }
+  }
+  if (!reading && F.timerFormat==='clock') {
+    const wide=readDigits(preview,size,{area:[.02,.29,1,.76],aligned:true});
+    const inferred=applyTimerFormat(wide,F.timerFormat);
+    if (inferred.clock) reading=inferred;
+  }
+  reading=applyTimerFormat(reading ?? readDigits(preview,size),F.timerFormat);
   return { found: true, identity:true, chroma:c.chroma, score: c.s, color: c.color, x: c.x, y: c.y,
-    size, yellow, ...readDigits(preview, size), preview, mode, rejected };
+    size, yellow, ...reading, preview, mode, rejected };
 }
 
 /* ---------- 등록 화면용: 클릭한 곳을 포함하는 아이콘 테두리 찾기 ---------- */

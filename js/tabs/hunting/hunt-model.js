@@ -41,8 +41,8 @@ export function observeExperience(m,value,now){
   // 퍼센트는 기록용이며 시작/유지 판단에는 사용하지 않는다.
   if(grew){
     const alreadyRunning = m.running;
-    if(!alreadyRunning)beginHunt(m,now,Number.isFinite(prev.percent) ? prev : next);
-    if (!leveled && prev?.raw && (alreadyRunning || Number.isFinite(prev.percent))) {
+    if(!alreadyRunning)beginHunt(m,now,prev);
+    if (!leveled && prev?.raw) {
       m.gainRaw = String(BigInt(m.gainRaw) + BigInt(next.raw) - BigInt(prev.raw));
     }
     m.lastGainAt=now;m.reason='사냥 측정 중';
@@ -50,7 +50,7 @@ export function observeExperience(m,value,now){
   if (Number.isFinite(next.percent)) {
     if (m.running) {
       // The first complete reading becomes the percent baseline when OCR started with raw only.
-      if (!Number.isFinite(m.startExp?.percent)) m.startExp = copy(next);
+      if (m.startExp && !Number.isFinite(m.startExp.percent)) m.startExp.percent = next.percent;
       const delta=experienceDelta(m.percentAnchor,next);
       if (delta!==null) m.gainPercent+=delta;
     }
