@@ -288,7 +288,10 @@ function calculate() {
  * 탭 정의
  * ============================================================ */
 const html = `
-    <p id="craftHint" class="hint text-right"></p>
+    <div class="space-y-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-right">
+      <p id="craftHint" class="text-xs font-semibold text-slate-700"></p>
+      <p class="hint">오일류는 부캐릭터로도 제작 레벨과 관계없이 만들 수 있습니다.</p>
+    </div>
     <div id="recipeList" class="space-y-7"></div>
 `;
 

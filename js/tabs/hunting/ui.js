@@ -221,24 +221,24 @@ function makePipCard(doc, label, icon, featured = false) {
   }
   const value = doc.createElement('span');
   value.style.cssText = 'font-weight:700;font-variant-numeric:tabular-nums;overflow-wrap:anywhere';
-  if (featured) value.style.cssText += ';font-size:22px;color:#4338ca;white-space:nowrap';
+  if (featured) value.style.cssText += ';font-size:22px;color:var(--accent);white-space:nowrap';
   card.append(value);
   return {card,value};
 }
 
 function makePipColumn(doc, featured = false) {
   const column = doc.createElement('div');
-  column.style.cssText = 'flex:1 0 auto;display:grid;grid-template-rows:repeat(2,24px);min-width:82px;align-content:center;padding:0 10px;border-right:1px solid #dbe3ef';
+  column.style.cssText = 'flex:1 0 auto;display:grid;grid-template-rows:repeat(2,24px);min-width:82px;align-content:center;padding:0 10px;border-right:1px solid var(--line)';
   if (featured) column.style.cssText += ';grid-template-rows:auto auto;min-width:158px';
   return column;
 }
 
-function pipTimeColor(text, fallback = '#0f172a') {
+function pipTimeColor(text, fallback = 'var(--ink)') {
   const clock = text.match(/(?:^|\s)(\d+):(\d{2})(?![:\d])/);
   const seconds = clock ? Number(clock[1])*60 + Number(clock[2]) : Number(text.match(/(\d+)초/)?.[1]);
-  if (/재설치|다시 설치/.test(text) || seconds <= 5) return '#b91c1c';
-  if (seconds <= 15) return '#a16207';
-  return Number.isFinite(seconds) ? '#047857' : fallback;
+  if (/재설치|다시 설치/.test(text) || seconds <= 5) return 'var(--pip-danger)';
+  if (seconds <= 15) return 'var(--pip-warning)';
+  return Number.isFinite(seconds) ? 'var(--pip-success)' : fallback;
 }
 
 function compactPipInstaller(text) {
@@ -258,6 +258,9 @@ function compactPipRune(now) {
 
 function renderPip(now) {
   if (!isPipOpen()) return;
+  const theme = document.documentElement.dataset.theme || 'light';
+  const root = pipWindow.document.documentElement;
+  if (root.dataset.theme !== theme) root.dataset.theme = theme;
   pipFields.forEach(([, id], index) => {
     const hunt = S.state.hunt;
     const value = id === 'huntExp'
@@ -298,7 +301,7 @@ function renderPip(now) {
     const value = compactPipInstaller(label);
     if (entry.value.textContent !== value) {
       entry.value.textContent = value;
-      entry.value.style.color = pipTimeColor(label, color.includes('red') ? '#b91c1c' : color.includes('emerald') ? '#047857' : '#0f172a');
+      entry.value.style.color = pipTimeColor(label, color.includes('red') ? 'var(--pip-danger)' : color.includes('emerald') ? 'var(--pip-success)' : 'var(--ink)');
     }
   }
 }
@@ -320,26 +323,37 @@ async function togglePip() {
     const doc = win.document;
     doc.title = '땅캐라 · 사냥 현황';
     doc.documentElement.lang = 'ko';
-    doc.body.style.cssText = 'margin:0;padding:10px;background:#f1f5f9;color:#0f172a;font:13px system-ui,sans-serif';
+    doc.body.style.cssText = 'margin:0;padding:10px;background:var(--canvas);color:var(--ink);font:13px system-ui,sans-serif';
     pipStrip = doc.createElement('div');
     pipStrip.className = 'pip-strip';
     pipStrip.style.cssText = 'display:flex;flex:1;min-width:0;overflow-x:auto;align-self:stretch';
     const style = doc.createElement('style');
     style.textContent = `
-      .pip-strip > div > div + div { border-top: 1px solid #e2e8f0; }
-      .pip-close:hover { background: #e2e8f0; color: #0f172a; }
+      :root {
+        --pip-danger: var(--danger, #b91c1c); --pip-warning: #a16207; --pip-success: #047857;
+      }
+      :root[data-theme="dark"] {
+        color-scheme: dark;
+        --pip-danger: #fda4af; --pip-warning: #fcd38a; --pip-success: #6ee7bb;
+      }
+      .pip-strip > div > div + div { border-top: 1px solid var(--line); }
+      .pip-close:hover { background: var(--line); color: var(--ink); }
       .pip-hunt-controls { display: flex; }
       .pip-hunt-controls button {
         flex: 1 0 0; min-width: 0; height: 24px; padding: 0 3px;
-        border: 0; background: transparent; color: #334155;
+        border: 0; background: transparent; color: var(--ink);
         font: 600 10px system-ui; white-space: nowrap; cursor: pointer;
       }
-      .pip-hunt-controls button:nth-child(n+3) { border-left: 1px solid #e2e8f0; }
-      .pip-hunt-controls button.pip-pause { color: #b91c1c; }
-      .pip-hunt-controls button.pip-primary { color: #4338ca; }
-      .pip-hunt-controls button:hover { background: #f1f5f9; }
+      .pip-hunt-controls button:nth-child(n+3) { border-left: 1px solid var(--line); }
+      .pip-hunt-controls button.pip-pause { color: var(--pip-danger); }
+      .pip-hunt-controls button.pip-primary { color: var(--accent); }
+      .pip-hunt-controls button:hover { background: var(--canvas); }
     `;
-    doc.head.append(style);
+    const paletteStyle = doc.createElement('link');
+    paletteStyle.rel = 'stylesheet';
+    paletteStyle.href = new URL('../../../css/style.css',import.meta.url).href;
+    doc.documentElement.dataset.palette = document.documentElement.dataset.palette || '1';
+    doc.head.append(paletteStyle,style);
     let column;
     pipValues = pipFields.map(([label,id], index) => {
       if (index === 0 || index % 2 === 1) {
@@ -355,7 +369,7 @@ async function togglePip() {
     pipControls = newHuntButtons(doc,controls);
     pipStrip.firstElementChild.append(controls);
     const panel = doc.createElement('div');
-    panel.style.cssText = 'display:flex;align-items:center;background:#fff;border:1px solid #dbe3ef;border-radius:10px;padding:5px 0';
+    panel.style.cssText = 'display:flex;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:5px 0';
     const close = doc.createElement('button');
     close.type = 'button';
     close.className = 'pip-close';

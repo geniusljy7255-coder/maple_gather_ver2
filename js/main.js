@@ -7,7 +7,29 @@ import hunting from './tabs/hunting/index.js';
 // 탭 정의: { id, title, className?, html, mount?(section), onShow?(), onHide?() }
 const TABS = [craft, scheduler, hunting];
 
+const themeToggle = document.getElementById('themeToggle');
+const root = document.documentElement;
+themeToggle.setAttribute('aria-checked', String(root.dataset.theme === 'dark'));
+themeToggle.addEventListener('click', () => {
+  const dark = root.dataset.theme !== 'dark';
+  root.dataset.theme = dark ? 'dark' : 'light';
+  themeToggle.setAttribute('aria-checked', String(dark));
+  try { localStorage.setItem('site-theme', root.dataset.theme); } catch {}
+});
+
 const nav = document.getElementById('tabNav');
+const tabIndicator = document.createElement('span');
+tabIndicator.className = 'tab-indicator';
+tabIndicator.setAttribute('aria-hidden', 'true');
+nav.appendChild(tabIndicator);
+
+function positionTabIndicator() {
+  const tab = nav.querySelector('[aria-selected="true"]');
+  if (!tab) return;
+  nav.style.setProperty('--tab-offset', `${tab.offsetLeft}px`);
+  nav.style.setProperty('--tab-width', `${tab.offsetWidth}px`);
+}
+
 const panels = document.getElementById('tabPanels');
 const views = new Map();
 let current = null;
@@ -18,6 +40,7 @@ function showTab(id) {
     section.classList.toggle('hidden', t.id !== id);
     btn.setAttribute('aria-selected', String(t.id === id));
   });
+  positionTabIndicator();
 }
 
 function switchTab(id) {
@@ -50,3 +73,8 @@ TABS.forEach(tab => {
 TABS.forEach(tab => tab.mount?.(views.get(tab.id).section));
 showTab(TABS[0].id);
 current = TABS[0].id;
+
+const tabResize = new ResizeObserver(positionTabIndicator);
+tabResize.observe(nav);
+for (const {btn} of views.values()) tabResize.observe(btn);
+requestAnimationFrame(() => { nav.dataset.ready = ''; });

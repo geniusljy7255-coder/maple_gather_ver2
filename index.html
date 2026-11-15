@@ -1,10 +1,15 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="ko" data-palette="6">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍁</text></svg>">
 <title>땅캐라</title>
+<script>
+  try {
+    if (localStorage.getItem('site-theme') === 'dark') document.documentElement.dataset.theme = 'dark';
+  } catch {}
+</script>
 <script src="https://cdn.tailwindcss.com/3.4.17"></script>
 <script>
   tailwind.config = {
@@ -33,22 +38,24 @@
     .value   { @apply text-right text-base font-extrabold text-slate-900; }
     .pos     { @apply text-red-600; }
     .neg     { @apply text-blue-600; }
-    .tab-btn { @apply flex-1 border-b-2 border-transparent px-3 py-3 text-sm font-bold text-slate-500 transition hover:text-slate-800 md:text-base; }
-    .tab-btn[aria-selected="true"] { @apply border-indigo-600 bg-white text-indigo-600; }
     .chip    { @apply whitespace-nowrap rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-xs font-bold text-slate-600; }
     .row     { @apply flex items-center justify-between gap-2 rounded-lg border border-transparent p-2 transition hover:border-slate-200 hover:bg-slate-50; }
     .cb      { @apply h-4 w-4 cursor-pointer rounded accent-indigo-600; }
   }
 </style>
 </head>
-<body class="min-h-screen bg-slate-100 p-3 font-sans text-slate-800 sm:p-6">
+<body class="min-h-screen bg-slate-100 p-3 font-sans text-slate-800 sm:px-6 sm:pb-6">
 
 <div id="page">
-<header class="mx-auto max-w-5xl px-1 py-3">
-  <h1 class="text-4xl font-black tracking-tight text-slate-900">땅캐라</h1>
+<header class="site-header">
+  <h1>땅캐라</h1>
+  <nav id="tabNav" role="tablist" aria-label="도구"></nav>
+  <button type="button" id="themeToggle" role="switch" aria-checked="false" aria-label="다크 모드">
+    <span class="theme-knob" aria-hidden="true"></span>
+    <span class="theme-symbol" aria-hidden="true">☀</span>
+    <span class="theme-symbol" aria-hidden="true">☾</span>
+  </button>
 </header>
-
-<nav class="mx-auto flex max-w-6xl overflow-hidden rounded-t-2xl border border-b-0 border-slate-200 bg-slate-100" id="tabNav" role="tablist"></nav>
 
 
 <!-- 왼쪽 슬라이드 패널: 시세 · 보유 수량 -->
@@ -65,7 +72,7 @@
           class="absolute left-full top-1/2 -translate-y-1/2 rounded-r-xl bg-indigo-600 px-2 py-8 text-xs font-bold text-white shadow-lg transition-all duration-300 hover:bg-indigo-700 [writing-mode:vertical-rl]">접기</button>
 </div>
 
-<main id="tabPanels" class="mx-auto max-w-6xl rounded-b-2xl border border-slate-200 bg-white p-4 md:p-6">
+<main id="tabPanels" class="mx-auto max-w-6xl p-4">
 </main>
 </div>
 
