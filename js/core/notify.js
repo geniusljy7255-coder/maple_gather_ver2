@@ -13,6 +13,7 @@ export function setAlarmEnabled(id,on){
 
 const PATTERNS = { info: [880], alert: [1175, 1175, 1175] };
 const subs = new Set();
+const voiceStartListeners = new Set();
 let ctx = null;
 
 export const getVoice = () => localStorage.getItem(VOICE_KEY) !== '0';
@@ -26,6 +27,7 @@ export function setVoiceVolume(value) {
   localStorage.setItem(VOICE_VOLUME_KEY, String(Math.max(0, Math.min(100, Number(value) || 0))));
 }
 export const onNotify = fn => subs.add(fn);
+export const onVoiceStart = fn => voiceStartListeners.add(fn);
 
 /** 브라우저는 사용자가 클릭한 뒤에만 소리를 허용하므로, 버튼 클릭 때 미리 호출해 둔다. */
 export function unlockAudio() {
@@ -71,6 +73,7 @@ function playNextVoice() {
       const speech = new SpeechSynthesisUtterance(text);
       speech.lang = 'ko-KR';
       speech.volume = getVoiceVolume() / 100;
+      speech.onstart = () => voiceStartListeners.forEach(listener=>listener({text,channel}));
       speech.onend = finish;
       speech.onerror = finish;
       speechSynthesis.speak(speech);

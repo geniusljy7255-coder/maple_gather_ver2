@@ -63,6 +63,8 @@ test('master and individual alarm controls stay in sync',()=>{
 test('overlapping announcements play in order and recover from a speech error',()=>{
  const previous = speechSynthesis.speak;
  const spoken = [];
+ const started = [];
+ N.onVoiceStart(event=>started.push(event.text));
  speechSynthesis.speak = utterance => spoken.push(utterance);
  try {
    N.setVoice(true);
@@ -70,10 +72,15 @@ test('overlapping announcements play in order and recover from a speech error',(
    N.notify('second','alert','janus');
    N.notify('third','alert','fountain');
    assert.equal(spoken.length,1);
+   assert.deepEqual(started,[]);
+   spoken[0].onstart();
    spoken[0].onend();
    assert.equal(spoken[1].text,'second');
+   spoken[1].onstart();
    spoken[1].onerror();
    assert.equal(spoken[2].text,'third');
+   spoken[2].onstart();
+   assert.deepEqual(started,['first','second','third']);
    spoken[2].onend();
  } finally {
    speechSynthesis.speak = previous;

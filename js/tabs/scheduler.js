@@ -2,6 +2,7 @@
 import { $, setText, esc } from '../core/dom.js';
 import { readJSON } from '../core/storage.js';
 import { formatKoreanMoney } from '../core/format.js';
+import { nexonApi } from '../core/nexon.js';
 import {
   DIFF_KOR, DAILY_DIFF_KEYS, WEEKLY_DIFF_KEYS, MONTHLY_DIFF_KEYS,
   EXCLUDED_WEEKLY, getBossPrice
@@ -49,6 +50,11 @@ function loadNames() {
   return [localStorage.getItem('nexon_character_name') || ''];   // 이전 버전에서 저장한 닉네임
 }
 const saveNames = () => localStorage.setItem('nexon_character_names', JSON.stringify(charNames));
+export function getSchedulerCharacters() {
+  const loaded=new Map(characters.map(({name,basic})=>[name,basic.character_image]));
+  return [...new Set([...loaded.keys(),...loadNames().filter(name=>typeof name==='string').map(name=>name.trim()).filter(Boolean)])]
+    .map(name=>({name,image:loaded.get(name)}));
+}
 
 function renderNameRows() {
   $('nameList').innerHTML = charNames.map((n, i) => `
@@ -85,7 +91,7 @@ async function fetchCharacterInfo() {
   if (!apiKey) return showError('Nexon Open API Key를 입력해주세요.');
   if (!names.length) return showError('캐릭터 닉네임을 입력해주세요.');
 
-  const api = path => fetch(`https://open.api.nexon.com/maplestory/v1/${path}`, { headers: { 'x-nxopen-api-key': apiKey } });
+  const api = nexonApi(apiKey);
   const prevOcid = currentChar()?.ocid;
   const found = [], errors = [];
 

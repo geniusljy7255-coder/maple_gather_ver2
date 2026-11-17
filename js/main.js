@@ -2,6 +2,7 @@
 import craft from './tabs/craft.js';
 import scheduler from './tabs/scheduler.js';
 import hunting from './tabs/hunting/index.js';
+import { mountCharacterCompanion } from './character-companion.js';
 
 // 새 탭은 파일을 만든 뒤 여기에 한 줄만 추가하면 됩니다.
 // 탭 정의: { id, title, className?, html, mount?(section), onShow?(), onHide?() }
@@ -17,13 +18,7 @@ themeToggle.addEventListener('click', () => {
   try { localStorage.setItem('site-theme', root.dataset.theme); } catch {}
 });
 
-const ideaMessage = document.getElementById('ideaMessage');
-let ideaMessageTimer;
-document.getElementById('ideaButton').addEventListener('click', () => {
-  clearTimeout(ideaMessageTimer);
-  ideaMessage.textContent = '여기다가 뭐 만들지?';
-  ideaMessageTimer = setTimeout(() => { ideaMessage.textContent = ''; }, 3000);
-});
+mountCharacterCompanion(document.getElementById('ideaButton'));
 
 const nav = document.getElementById('tabNav');
 const tabIndicator = document.createElement('span');

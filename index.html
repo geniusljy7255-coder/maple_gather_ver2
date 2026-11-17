@@ -46,6 +46,12 @@
 </head>
 <body class="min-h-screen bg-slate-100 p-3 font-sans text-slate-800 sm:px-6 sm:pb-6">
 
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <filter id="companion-map-cutout" color-interpolation-filters="sRGB">
+    <feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  3 3 3 0 0" result="map-opacity"/>
+    <feComposite in="SourceGraphic" in2="map-opacity" operator="in"/>
+  </filter>
+</svg>
 <div id="page">
 <header class="site-header">
   <h1><span class="site-logo"><img src="icon/logo.png" width="1376" height="768" alt="땅캐라"></span></h1>
@@ -56,9 +62,8 @@
       <span class="theme-symbol" aria-hidden="true">☀</span>
       <span class="theme-symbol" aria-hidden="true">☾</span>
     </button>
-    <button type="button" id="ideaButton" aria-label="아이디어">?</button>
+    <button type="button" id="ideaButton" aria-label="내 캐릭터 설정">?</button>
   </div>
-  <p id="ideaMessage" class="header-message" role="status"></p>
 </header>
 
 
