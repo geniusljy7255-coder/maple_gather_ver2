@@ -1,7 +1,14 @@
 /* 룬 버프/재사용 대기 관측은 분리하고, 화면에는 우선순위에 따라 한 상태만 표시한다. */
 export const createRuneState=()=>({announced:false,markerSince:null,markerMissing:null,markerSeen:0,markerPresent:false,markerMisses:0,awaitingBuff:false,
   buffSeen:0,buffKind:null,buffDeadline:0,cooldownDeadline:0,cooldownApprox:false,cooldownSeen:0,cooldownMode:null,
-  buffAnchor:null,buffSamples:[],cooldownSamples:[],lastMinute:null,diagnostics:{}});
+  buffAnchor:null,buffSamples:[],buffConfirmedAt:0,cooldownSamples:[],lastMinute:null,diagnostics:{}});
+export function runeScanInterval(s,now){
+  const deadline=s.buffDeadline>now ? s.buffDeadline : s.cooldownDeadline;
+  const sample=s.cooldownSamples.at(-1);
+  const confirmingSeconds=s.cooldownApprox && sample?.n<=599 && now-sample.t<=6500;
+  if (deadline-now<=8000 || confirmingSeconds || (s.buffDeadline>now && now-s.buffConfirmedAt<5000)) return 0;
+  return 30000;
+}
 export function cooldownSeconds(value,mode,unit){
   if(!Number.isInteger(value)||value<1||value>900)return null;
   if (unit==='minutes' && (value<10 || value>15)) return null;
@@ -18,14 +25,11 @@ export function updateRune(s,results,now){
   let alert=false;
   const gray = (results||[]).find(r=>r.id==='rune_cooldown'&&r.found&&r.identity!==false&&r.chroma);
   const buffs=(results||[]).filter(r=>r.found&&r.identity!==false&&
+    (s.buffDeadline>now || s.cooldownDeadline<=now)&&
     (r.id==='rune_normal'||r.id==='rune_blessed') &&
     !(gray && Math.abs(gray.x-r.x)<gray.size*.5 && Math.abs(gray.y-r.y)<gray.size*.5));
   const timed = buffs.filter(r=>Number.isInteger(r.seconds)&&r.confidence>=.83&&r.seconds>0&&r.seconds<=900);
   const longest = timed.reduce((best,r)=>!best || r.seconds>best.seconds ? r : best,null);
-  if (gray && s.buffAnchor && Math.abs(gray.x-s.buffAnchor.x)<gray.size*.5 &&
-      Math.abs(gray.y-s.buffAnchor.y)<gray.size*.5) {
-    s.buffSeen=0;s.buffDeadline=0;s.buffAnchor=null;s.buffSamples=[];
-  }
   if (buffs.length) {
     s.buffSeen=now;
     s.buffKind=buffs.some(r=>r.id==='rune_blessed') ? "축복의 룬" : "룬";
@@ -35,11 +39,12 @@ export function updateRune(s,results,now){
     const last = s.buffSamples.at(-1);
     if (Math.abs(last.t + last.n*1000 - now - longest.seconds*1000)>1500) s.buffSamples=[];
   }
-  if (longest && confirm(s.buffSamples,longest.seconds,now)) {
+  if (longest && (s.buffDeadline<=now || now-s.buffConfirmedAt<5000) && confirm(s.buffSamples,longest.seconds,now)) {
     const deadline=now+longest.seconds*1000;
     // A shorter combat effect must not replace the longer experience effect.
     if (s.buffDeadline<=now || deadline>s.buffDeadline+1500) {
       s.buffDeadline=deadline;
+      s.buffConfirmedAt=now;
       s.buffAnchor={x:longest.x,y:longest.y};
     }
   }
@@ -87,16 +92,19 @@ export function updateRune(s,results,now){
       if(!confirm(s.cooldownSamples,n.seconds,now,n.approx,6500))continue;
       // 분 숫자가 그대로인 동안 매 프레임 만료 시점을 뒤로 밀지 않는다.
       if(n.approx&&s.lastMinute===r.seconds&&s.cooldownMode==='minutes')continue;
-      if(s.cooldownMode==='seconds'&&predicted>0&&Math.abs(predicted-n.seconds)>3)continue;
-      if(s.cooldownMode==='seconds'&&predicted>0&&Math.abs(predicted-n.seconds)<=2)continue;
+      if(s.cooldownMode==='seconds'&&predicted>0)continue;
       s.cooldownDeadline=now+n.seconds*1000;s.cooldownApprox=n.approx;s.cooldownMode=n.mode;s.lastMinute=n.approx?r.seconds:null;
+      if (r===gray && s.buffAnchor && now-s.buffConfirmedAt<5000 &&
+          Math.abs(r.x-s.buffAnchor.x)<r.size*.5 && Math.abs(r.y-s.buffAnchor.y)<r.size*.5) {
+        s.buffSeen=0;s.buffDeadline=0;s.buffAnchor=null;s.buffSamples=[];
+      }
     }
   }
   return alert;
 }
 export function runePresentation(s,now){
-  if(s.buffDeadline>now)return {label:'룬 버프 적용 중',seconds:Math.ceil((s.buffDeadline-now)/1000),approx:now-s.buffSeen>5000};
-  if(s.cooldownDeadline>now)return {label:'룬 재사용 대기',seconds:Math.ceil((s.cooldownDeadline-now)/1000),approx:s.cooldownApprox||now-s.cooldownSeen>5000};
+  if(s.buffDeadline>now)return {label:'룬 버프 적용 중',seconds:Math.ceil((s.buffDeadline-now)/1000),approx:false};
+  if(s.cooldownDeadline>now)return {label:'룬 재사용 대기',seconds:Math.ceil((s.cooldownDeadline-now)/1000),approx:s.cooldownApprox};
   if(s.cooldownSeen&&now-s.cooldownSeen<6500&&(!s.cooldownDeadline||s.cooldownSeen>s.cooldownDeadline))return {label:'룬 재사용 대기',seconds:null,detail:'남은 시간 확인 중'};
   if(s.buffSeen&&now-s.buffSeen<5000&&!s.buffDeadline)return {label:'룬 버프 적용 중',seconds:null,detail:'남은 시간 확인 중'};
   if(s.markerPresent || (s.markerSeen&&now-s.markerSeen<5000))return {label:'룬이 나타났습니다',seconds:null};

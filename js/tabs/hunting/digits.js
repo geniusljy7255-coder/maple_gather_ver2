@@ -1,4 +1,4 @@
-import { RUNE_COOLDOWN_GLYPHS } from '../../data/screen-glyphs.js';
+import { RUNE_COOLDOWN_GLYPHS, SCREEN_GLYPHS } from '../../data/screen-glyphs.js';
 import { BUILTIN } from '../../data/builtin-icons.js';
 /* 작은 노란 숫자 전용 판독. 낮은 점수/비슷한 후보는 읽지 않는다. */
 const LARGE_TIMER_GLYPHS = [[5,7,"000000000000000000000000000000000001111111111111111000001100000110000011100001111110000011100000110000011000011111111111111110000000000000000000000000000000000000000000"],[4,8,"000000000000000000000000000000000000000000001110000011100001111000011110000111100011111001101110011111101111111011111111000001100000011000000000000000000000000000000000000000000000000000000000"],[7,8,"000000000000000000000000000000000000000011111111011111110000011100000110000001100000110000001100000110000001100000110000001100000111000000100000000000000000000000000000000000000000000000000000"],[5,7,"000000000000000000000000000000000001111111111111111000001100000111000011100001111111000011100000110000011000011111111111111110000000000000000000000000000000000000000000"],[4,8,"000000000000000000000000000000000000000000001100000011100001111000011110001111100111011001101110011011101111111111111111000011100000011000000110000000000000000000000000000000000000000000000000"],[8,8,"000000000000000000000000000000000000000001111110111111111100001111000011110000111110111101111110111001111100001111000011111001111111111101111110000000000000000000000000000000000000000000000000"],[6,8,"000000000000000000000000000000000000000000111111011111111100000011000000110000001100000011111110111001111100001111000011110001111111111101111110000000000000000000000000000000000000000000000000"],[9,8,"000000000000000000000000000000000000000001111110111111111100001111000011110000111100001101111111000111110000001100000011000001110111111001111110000000000000000000000000000000000000000000000000"],[3,7,"000000000000000000000000000000000001111110111111100000110000011000011100001110111111000011100000110000011000011111111111111110000000000000000000000000000000000000000000"],[8,8,"000000000000000000000000000000000000000001111110111111111100001111000011111000111111011101111110111101111110001111000011111000111111111101111110000000000000000000000000000000000000000000000000"],[5,7,"000000000000000000000000000000000001111111111111111000001100000110000011100001111111000011100000110000011000011111111111111110000000000000000000000000000000000000000000"],[9,8,"000000000000000000000000000000000000000001111110111111111100001111000011110000111100001101111111000111110000001100000011000001110111111001111100000000000000000000000000000000000000000000000000"]];
@@ -81,7 +81,7 @@ export function applyTimerFormat(reading,format) {
   return reading;
 }
 
-let runeCooldownTemplates;
+let runeCooldownTemplates,minuteLabelTemplates;
 export function readDigits(rgba,size,options={}) {
   const mask=new Uint8Array(size*size);
   const area=options.area||[.125,.1875,.875,.8125];
@@ -95,7 +95,7 @@ export function readDigits(rgba,size,options={}) {
     const selected = options.dark
       ? Math.max(r,g,b)<105 && Math.max(r,g,b)-Math.min(r,g,b)<50
       : options.light
-        ? Math.min(r,g,b)>150 && Math.max(r,g,b)-Math.min(r,g,b)<100
+        ? Math.min(r,g,b)>(options.lightThreshold ?? 150) && Math.max(r,g,b)-Math.min(r,g,b)<100
         : options.goldTimer ? yellow && g >= r*.87 : yellow;
     if (!selected) continue;
     const base = options.background;
@@ -137,8 +137,20 @@ export function readDigits(rgba,size,options={}) {
     if(!n && start!==null) {runs.push([start,x]);start=null;}
   }
   const unknown={seconds:null,confidence:0,digit:count*(32/size)**2<=2?'absent':'uncertain'};
-  if(!runs.length || runs.length>4 || (options.clockOnly && runs.length!==4)) return unknown;
-  const clockLayout=runs.length===4;
+  if(!runs.length || runs.length>(options.longTimer?5:4) || (!options.longTimer && options.clockOnly && runs.length!==4)) return unknown;
+  const colonIndex=options.longTimer && runs.length>=4 ? runs.length-3 : 1;
+  const [colonLeft,colonRight]=runs[colonIndex] ?? [];
+  let colonGroups=0,colonPrevious=false;
+  for(let y=y0;y<y1 && colonLeft!==undefined;y++){
+    let lit=false;
+    for(let x=colonLeft;x<colonRight;x++) lit ||= Boolean(mask[y*size+x]);
+    if(lit && !colonPrevious) colonGroups++;
+    colonPrevious=lit;
+  }
+  const clockLayout=options.longTimer
+    ? runs.length>=4 && colonRight-colonLeft<=Math.ceil(size*.10) && colonGroups===2
+    : runs.length===4;
+  if((options.clockOnly || runs.length===5) && !clockLayout) return unknown;
   let text='', confidence=1, firstBounds;
   for(const [index,[left,right]] of runs.entries()) {
     const w=right-left,bits=new Uint8Array(w*size);
@@ -146,28 +158,28 @@ export function readDigits(rgba,size,options={}) {
     for(let y=y0;y<y1;y++) for(let x=left;x<right;x++) if(mask[y*size+x]) {
       bits[y*w+x-left]=1; top=Math.min(top,y);bottom=Math.max(bottom,y);
     }
-    if (clockLayout && index===1) {
+    if (clockLayout && index===colonIndex) {
       if (w>Math.ceil(size*.10) || !firstBounds ||
           top<firstBounds.top || bottom>firstBounds.bottom || bottom-top>=firstBounds.bottom-firstBounds.top) return unknown;
-      let groups=0, previousRow=false;
-      for (let y=top;y<=bottom;y++) {
-        let lit=false;
-        for (let x=0;x<w;x++) lit ||= Boolean(bits[y*w+x]);
-        if (lit && !previousRow) groups++;
-        previousRow=lit;
-      }
-      if (groups!==2) return unknown;
+      if (colonGroups!==2) return unknown;
       text+=':';
       continue;
     }
-    if(bottom-top+1<size*.18 || bottom-top+1>size*.55) return unknown;
+    if(bottom-top+1<size*(options.minGlyphHeight ?? .18) || bottom-top+1>size*.55) return unknown;
     if (options.aligned || clockLayout) {
       const tolerance = Math.max(1, Math.round(size * .08));
       if (firstBounds && (Math.abs(top-firstBounds.top)>tolerance || Math.abs(bottom-firstBounds.bottom)>tolerance)) return unknown;
     }
     firstBounds ??= {top,bottom};
     const glyph=normalize(bits,w,size),scores=Array(10).fill(0);
-    const templates = options.runeCooldown || clockLayout
+    const templates = options.minuteLabel
+      ? (minuteLabelTemplates ??= [...getTemplates(),
+          ...SCREEN_GLYPHS.filter(g=>g.h<=7 && /^\d$/.test(g.char)).map(g=>({
+            digit:Number(g.char),...normalize(Uint8Array.from(g.bits,Number),g.w,g.h)
+          })),
+          {digit:1,...normalize(new Uint8Array(5).fill(1),1,5)}
+        ])
+      : options.runeCooldown || clockLayout
       ? (runeCooldownTemplates ??= [...getTemplates(),...RUNE_COOLDOWN_GLYPHS.map(g=>({
           digit:g.digit,...normalize(Uint8Array.from(g.bits,Number),g.w,g.h)
         }))])
@@ -203,11 +215,11 @@ export function readDigits(rgba,size,options={}) {
     text+=order[0].digit; confidence=Math.min(confidence,order[0].score);
   }
   if (text.includes(':')) {
-    const clock=text.match(/^([1-9]):([0-5]\d)$/);
+    const clock=text.match(options.longTimer ? /^([1-9]\d?):([0-5]\d)$/ : /^([1-9]):([0-5]\d)$/);
     if (!clock) return unknown;
     return {seconds:Number(clock[1])*60+Number(clock[2]),confidence,digit:'visible',unit:'seconds',clock:true};
   }
   const seconds=Number(text);
-  if((text.length>1 && text[0]==='0') || seconds<(options.min??6) || seconds>999) return unknown;
+  if((text.length>1 && text[0]==='0') || seconds<(options.min??6) || seconds>(options.longTimer?9999:999)) return unknown;
   return {seconds,confidence,digit:'visible'};
 }

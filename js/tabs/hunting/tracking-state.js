@@ -18,7 +18,7 @@ export function advance(tr,r,now) {
     tr.samples=[];tr.lastReadAt=0;tr.absentSince=null;
   }
   if(r.found) tr.anchor={x:r.x,y:r.y,size:r.size};
-  const valid=r.found && Number.isInteger(r.seconds) && r.seconds >= (custom ? 1 : 6) && r.confidence>=.83;
+  const valid=r.found && r.identity!==false && Number.isInteger(r.seconds) && r.seconds >= (custom ? 1 : 6) && r.confidence>=.83;
   let accepted=false;
   if(valid) {
     tr.samples.push({n:r.seconds,t:now});

@@ -30,6 +30,20 @@ try {
 
 export const onJobInstallersChange = listener => listeners.add(listener);
 export const jobSkill = item => jobSkills.find(skill => skill.id === item.skill);
+const alertNames={
+  라라_강줄기_흐르는_곳:'강줄기',
+  섀도어_다크_플레어:'플레어',
+  은월_소혼_장막:'소혼장막',
+  칼리_데스_블로섬:'블로섬',
+  캡틴_배틀쉽_봄버:'배틀쉽',
+  캡틴_시즈_봄버:'시즈봄버',
+  호영_흡성와류:'흡성와류'
+};
+export function jobAlarm(item) {
+  const skill=jobSkill(item);
+  if (!skill) return null;
+  return {id:item.id+':'+skill.id,label:alertNames[skill.id] ?? skill.label};
+}
 export function jobIconFile(item) {
   const skill = jobSkill(item);
   if (!skill) return null;

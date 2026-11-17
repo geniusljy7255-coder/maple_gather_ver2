@@ -264,7 +264,7 @@ export function analyzeExperience(F,now) {
         const percentRegressed = previous.percent != null && current.percent != null && current.percent < previous.percent;
         const suspicious = nextRaw - previousRaw > maxGain;
         // A damaged percent glyph must not suppress a plausible integer increase.
-        if (!suspicious && percentRegressed) current.percent = null;
+        if (!suspicious && percentRegressed) {current.percent=null;exp.recheck=true;}
         if (suspicious) {
           // Repeated OCR can repeat the same wrong digit. When the percent is
           // available, a large integer gain should move it by a similar amount.
@@ -288,6 +288,7 @@ export function analyzeExperience(F,now) {
       exp.previous=previous;
       lastExpSuccess=now;
     } else {
+      exp.recheck=true;
       exp.reason='경험치 숫자 연속 확인 중';
       exp.value=null;
     }

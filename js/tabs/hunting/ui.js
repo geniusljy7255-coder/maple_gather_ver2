@@ -1,6 +1,7 @@
 import { getTimerFormat, setTimerFormat } from './detector.js';
-import { jobInstallers, jobSkill, jobIconFile, installerIcon } from './job-installers.js';
+import { jobInstallers, jobSkill, jobIconFile, installerIcon, jobAlarm, onJobInstallersChange } from './job-installers.js';
 import {runePresentation} from './rune-state.js';
+import {experienceBuffGroups,experienceBuffIcon} from './experience-buffs.js';
 /* 사냥 도우미: 화면 구성 · 이벤트 연결 · 렌더링 */
 import { $, setText } from '../../core/dom.js';
 import { formatHMS, formatMS } from '../../core/format.js';
@@ -41,12 +42,13 @@ export const html = `
       </div>
       <label class="flex items-center gap-2 text-xs font-bold">
         <span class="shrink-0 whitespace-nowrap">음성 크기</span>
-        <input id="huntVoiceVolume" type="range" min="0" max="100" step="5" class="w-full min-w-0 flex-1 accent-indigo-600">
+        <input id="huntVoiceVolume" type="range" min="0" max="100" step="5" class="hunt-volume w-full min-w-0 flex-1">
         <output class="w-10 shrink-0 text-right tabular-nums" id="huntVoiceVolumeValue" for="huntVoiceVolume"></output>
       </label>
       <fieldset class="min-w-0 rounded-lg bg-slate-50 px-3 py-2">
         <legend class="px-1 text-xs font-bold text-slate-600">알림별 소리</legend>
         <div class="flex flex-wrap gap-x-4 gap-y-2">${ALARM_CHANNELS.map(c=>`<label class="flex items-center gap-2 whitespace-nowrap text-xs"><input id="alarm-${c.id}" type="checkbox" class="cb">${c.label}</label>`).join('')}</div>
+        <div id="jobAlarmControls" class="flex flex-wrap gap-x-4 gap-y-2"></div>
       </fieldset>
     </section>
   </div>
@@ -59,11 +61,11 @@ export const html = `
   </h2>
   <div class="grid grid-cols-2 gap-3">
     ${dashCard('사냥 시간', '<div id="huntTime" class="min-h-10 text-3xl leading-10 font-black tabular-nums text-indigo-600">00:00:00</div><div class="min-h-4" aria-hidden="true"></div>')}
-    ${dashCard(iconLabel('솔 에르다 조각',new URL('../../../icon/솔_에르다_조각.png',import.meta.url).href), '<div id="huntFragments" class="min-h-10 text-3xl leading-10 font-black tabular-nums text-indigo-600">—</div><div id="huntFragmentsDetail" class="hint min-h-4"></div>')}
+    ${dashCard(iconLabel('솔 에르다 조각',new URL('../../../icon/솔_에르다_조각.png',import.meta.url).href)+' <span class="hint ml-1">(약 10초마다 갱신)</span>', '<div id="huntFragments" class="min-h-10 text-3xl leading-10 font-black tabular-nums text-indigo-600">—</div><div id="huntFragmentsDetail" class="hint min-h-4"></div>')}
   </div>
   <div class="card space-y-2">
     <div class="flex flex-wrap items-baseline justify-between gap-2">
-      <span class="label">획득 경험치</span><span id="huntExp" class="text-sm font-black text-indigo-600">인식 대기</span>
+      <span class="label">획득 경험치 <span class="hint ml-1">(약 5초마다 갱신)</span></span><span id="huntExp" class="text-sm font-black text-indigo-600">인식 대기</span>
     </div>
     <div id="huntExpProgress" role="progressbar" aria-label="현재 레벨 경험치" aria-valuemin="0" aria-valuemax="100" class="h-2 overflow-hidden rounded-full bg-slate-200">
       <div id="huntExpBar" class="h-full bg-emerald-500" style="width:0%"></div>
@@ -113,7 +115,7 @@ export const html = `
 <div class="panel">
   <h2 class="panel-h"><span><span class="dot"></span>룬 · 설치기</span><div class="flex flex-wrap items-center justify-end gap-2">
     <label class="flex items-center gap-1.5 text-xs text-slate-600">
-      <span>시간 표기</span>
+      <span>인게임 시간 표기</span>
       <select id="huntTimerFormat" class="rounded-lg border border-slate-300 bg-white px-2 py-1.5 font-bold text-slate-800">
         <option value="seconds">초</option>
         <option value="clock">분:초</option>
@@ -130,6 +132,21 @@ export const html = `
     ${installersHtml}
   </div>
 </div>
+
+<section class="panel">
+  <h2 class="panel-h"><span><span class="dot"></span>경험치 버프</span></h2>
+  <div class="grid grid-cols-2 gap-2 md:grid-cols-4">
+    ${experienceBuffGroups.map(({id,label,files})=>`
+      <div class="card flex items-center justify-between gap-2">
+        <span class="flex min-w-0 items-center gap-2">
+          <img id="exp-buff-icon-${id}" src="${experienceBuffIcon(files[0])}" alt="" width="24" height="24" class="h-6 w-6 shrink-0 rounded">
+          <span class="label" id="exp-buff-label-${id}">${label}</span>
+        </span>
+        <span id="exp-buff-time-${id}" class="hint shrink-0 tabular-nums">--:--</span>
+      </div>
+    `).join('')}
+  </div>
+</section>
 `;
 
 /* ---------- 화면 공유 ---------- */
@@ -255,11 +272,12 @@ function compactPipInstaller(text) {
   return text?.match(/\d+초/)?.[0] ?? (text?.includes('다시 설치') ? '재설치' : '—');
 }
 
+const formatBuffTime=(ms,approx)=>approx ? '약 '+Math.ceil(ms/60000)+'분' : formatMS(ms);
 function compactPipRune(now) {
   if (!getInfo().active) return '—';
   const rune = runePresentation(S.state.rune,now);
   if (rune.seconds !== null) {
-    const time = formatMS(rune.seconds*1000);
+    const time = formatBuffTime(rune.seconds*1000,rune.approx);
     return rune.label === '룬 재사용 대기' ? '대기 '+time : time;
   }
   if (rune.label === '룬이 나타났습니다') return '출현';
@@ -431,25 +449,51 @@ export function bind() {
 
   const volume = $('huntVoiceVolume');
   volume.value = getVoiceVolume();
-  setText('huntVoiceVolumeValue', volume.value + '%');
+  const renderVolume=()=>{
+    const percent=volume.value+'%';
+    volume.style.setProperty('--volume-progress',percent);
+    setText('huntVoiceVolumeValue',percent);
+  };
+  renderVolume();
   volume.addEventListener('input', () => {
     setVoiceVolume(volume.value);
-    setText('huntVoiceVolumeValue', volume.value + '%');
+    renderVolume();
   });
   const master = $('huntVoice');
+  const jobControls=new Map();
+  const allAlarmIds=()=>[...ALARM_CHANNELS.map(channel=>channel.id),...jobControls.keys()];
   function syncAlarmControls() {
-    master.checked = ALARM_CHANNELS.some(channel => isAlarmEnabled(channel.id));
+    master.checked = allAlarmIds().some(isAlarmEnabled);
     setVoice(master.checked);
     for (const channel of ALARM_CHANNELS) {
       $('alarm-' + channel.id).checked = isAlarmEnabled(channel.id);
     }
+    for (const [id,input] of jobControls) input.checked=isAlarmEnabled(id);
   }
+  function renderJobAlarms() {
+    const container=$('jobAlarmControls');
+    container.replaceChildren();
+    jobControls.clear();
+    for (const item of jobInstallers) {
+      const channel=jobAlarm(item);
+      if (!channel) continue;
+      const label=document.createElement('label'),input=document.createElement('input');
+      label.className='flex items-center gap-2 whitespace-nowrap text-xs';
+      input.type='checkbox';input.className='cb';
+      input.addEventListener('change',()=>{setAlarmEnabled(channel.id,input.checked);syncAlarmControls();});
+      label.append(input,channel.label);
+      container.append(label);
+      jobControls.set(channel.id,input);
+    }
+  }
+  renderJobAlarms();
+  onJobInstallersChange(()=>{renderJobAlarms();syncAlarmControls();});
   if (!getVoice()) {
-    for (const channel of ALARM_CHANNELS) setAlarmEnabled(channel.id, false);
+    for (const id of allAlarmIds()) setAlarmEnabled(id, false);
   }
   syncAlarmControls();
   master.addEventListener('change', () => {
-    for (const channel of ALARM_CHANNELS) setAlarmEnabled(channel.id, master.checked);
+    for (const id of allAlarmIds()) setAlarmEnabled(id, master.checked);
     syncAlarmControls();
   });
   for (const channel of ALARM_CHANNELS) {
@@ -524,9 +568,19 @@ function renderMeasurements(now){
     '시작 '+(h.fragmentStart === null ? '—' : h.fragmentStart+'개')+
     ' → 현재 '+(h.latestFragments === null ? '—' : h.latestFragments+'개'));
   const rune=runePresentation(r,now);
+  for (const {id,label,files} of experienceBuffGroups) {
+    const buff=sharing ? v.expBuffs?.[id] : null;
+    const active=buff?.deadline>now;
+    const icon=$('exp-buff-icon-'+id);
+    const src=experienceBuffIcon(active && files.includes(buff.file) ? buff.file : files[0]);
+    if (icon.src!==src) icon.src=src;
+    setText('exp-buff-label-'+id,active && buff.multiplier ? label+' ×'+buff.multiplier : label);
+    setText('exp-buff-time-'+id,active ? formatBuffTime(buff.deadline-now,buff.approx) :
+      buff?.seenAt && now-buff.seenAt<6500 ? (buff.sample && now-buff.sample.at<6500 ? '시간 확인 중' : '시간 판독 중') : '--:--');
+  }
   const runeLabel = rune.label.endsWith('버프 적용 중') ? '룬 버프 적용 중' : rune.label;
   setText('runeState', sharing ? runeLabel : '화면 공유 대기');
-  setText('runeRemaining',!sharing?'':rune.seconds!==null?(rune.approx?'약 ':'')+formatMS(rune.seconds*1000):(rune.detail||''));
+  setText('runeRemaining',!sharing?'':rune.seconds!==null?formatBuffTime(rune.seconds*1000,rune.approx):(rune.detail||''));
   setText('huntHistoryWarn',h.storageError?'브라우저 저장에 실패했습니다. 현재 기록은 이 화면에서만 유지됩니다.':'최근 10개 저장');
   const key=JSON.stringify(h.history);
   if(key!==historyKey){

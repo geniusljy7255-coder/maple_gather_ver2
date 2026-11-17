@@ -3,6 +3,7 @@ import { WINDOW_RUNE_COOLDOWN } from '../../data/monitor-reference.js';
 import { makeTemplate, prepareFrame, detect, resizeIcon } from './matcher.js';
 import { applyTimerFormat, readDigits } from './digits.js';
 import { analyzeExperience, analyzeScreen, resetScreenMonitor } from './screen-monitor.js';
+import {createExperienceBuffDetector,scanExperienceBuffs} from './experience-buff-detector.js';
 
 const SIZES = [32, 45, 44, 24, 28, 20, 26, 30, 22, 18, 16, 34, 36, 40, 48, 64];
 // Keep the common sizes first, then cover intermediate UI scales.
@@ -11,8 +12,10 @@ const INSTALLER_SIZES = [...new Set([
 ])];
 let targets = [], generation = 0, dimensions = '', scanCursor = 0, localCursor = 0;
 let experienceBox = null;
+let buffDetector=createExperienceBuffDetector([]),buffConfig='',buffDimensions='';
 const isLara = target => target.file?.startsWith('라라_');
 const isInstaller = target => target.id === "janus" || target.id === "fountain" || target.id.startsWith("job-");
+const runeTypes = ['rune_normal','rune_blessed','rune_cooldown'];
 const isCaptainBomber = target => target.file?.startsWith('캡틴_');
 const tpl = (img,whole=false) => makeTemplate(img.rgba, img.w, img.h,whole);
 
@@ -43,23 +46,48 @@ function trackInCrop(frame,variant,radius,variantAt) {
 const windowCooldown = makeTemplate(WINDOW_RUNE_COOLDOWN.rgba,32,32,true);
 
 const isBuff = target => target.id !== 'rune_marker' && target.id !== 'fragments_icon';
+function readExperienceBuffs(frame,now,dimensions,onlyPending=false) {
+  if (buffDimensions!==dimensions) {
+    buffDimensions=dimensions;
+    for (const asset of buffDetector.assets) asset.last=null;
+  }
+  return scanExperienceBuffs(buffDetector,frame,now,cropFrame,onlyPending);
+}
 
 self.onmessage = ({ data }) => {
   try {
     if (data.type === 'config') {
       generation = data.generation;
+      const assets=data.experienceBuffAssets ?? [];
+      const buffKey=JSON.stringify([data.captureRevision,assets.map(asset=>asset.file)]);
+      if (buffKey!==buffConfig) {
+        buffConfig=buffKey;
+        buffDetector=createExperienceBuffDetector(assets);
+        buffDimensions='';
+      }
       targets = data.targets.map(t => ({
         id: t.id, file: t.file, cursor: 0, localSize: 0, locked: null, misses: 0,
         variants: [...new Set([t.main.w, ...(isInstaller(t) ? INSTALLER_SIZES : t.sizes || SIZES)])].map(size => ({
-          thr: isInstaller(t) && size >= 40 && size !== t.main.w ? t.thr-.045 : t.thr, colorMode:t.colorMode, marker: !!t.marker, main: tpl(resizeIcon(t.fhd && size >= 15 ? t.fhd : t.main, size),isLara(t) ? 'wide-timer' : t.whole),
+          thr: !t.id.startsWith('job-') && isInstaller(t) && size >= 40 && size !== t.main.w ? t.thr-.045 : t.thr,
+          minColor:t.id.startsWith('job-') ? .85 : undefined,
+          colorMode:t.colorMode, marker: !!t.marker, main: tpl(resizeIcon(t.fhd && size >= 15 ? t.fhd : t.main, size),isLara(t) ? 'wide-timer' : t.whole),
           reject: t.reject ? tpl(resizeIcon(t.reject, size)) : null, last: null
         }))
       }));
       dimensions = '';scanCursor=0;localCursor=0;resetScreenMonitor(); experienceBox = null;
       return;
     }
-    if (data.type !== 'frame' || data.generation !== generation) return;
+    if (data.generation !== generation) return;
     const t0 = performance.now();
+    if (data.type==='buff-frame') {
+      const frame=prepareFrame(new Uint8ClampedArray(data.buffer),data.w,data.h);
+      frame.sourceWidth=data.sourceWidth;
+      frame.timerFormat=data.timerFormat;
+      const expBuffs=readExperienceBuffs(frame,data.t,data.sourceWidth+'x'+data.sourceHeight,true);
+      postMessage({type:'buff-ready',generation,t:data.t,ms:performance.now()-t0,results:[],monitor:{expBuffs}});
+      return;
+    }
+    if (data.type!=='frame') return;
     const dims = data.w + 'x' + data.h;
     if (dimensions !== dims) {
       targets.forEach(t => { t.locked = null; t.misses = 0; t.cursor = 0; t.localSize = 0; t.variants.forEach(v => v.last = null); });
@@ -76,7 +104,8 @@ self.onmessage = ({ data }) => {
       const box=data.experienceBox;
       experienceBox=box?.sourceWidth===F.w && box.sourceHeight===F.h ? box : null;
     }
-    const firstExperience = !data.targetIds && !experienceBox && !data.externalExperience
+    const readExp=!data.externalExperience && data.scanExperience!==false;
+    const firstExperience = !data.targetIds && !experienceBox && readExp
       ? analyzeExperience(F,data.t)
       : undefined;
     if (firstExperience?.value) {
@@ -84,7 +113,9 @@ self.onmessage = ({ data }) => {
       postMessage({type:'experience-ready',generation,t:data.t,results:[],monitor:{exp:firstExperience}});
     }
     F.timerFormat=data.timerFormat;
-    const selected = data.targetIds ? targets.filter(t => data.targetIds.includes(t.id)) : targets;
+    const selected = targets.filter(t => (!data.targetIds || data.targetIds.includes(t.id)) &&
+      (data.scanRune!==false || !t.id.startsWith('rune_')) &&
+      (data.scanFragments!==false || t.id!=='fragments_icon'));
     const searching = selected.filter(t => t.locked === null);
     const nearbyTargets = searching.filter(isBuff);
     const installerTargets = nearbyTargets.filter(isInstaller);
@@ -117,11 +148,11 @@ self.onmessage = ({ data }) => {
     const searchesHud = t => (['janus','fountain'].includes(t.id) || isCaptainBomber(t)) &&
       (t.locked === null || t.misses > 0 || t.variants[t.locked].last?.y < F.h*.5);
     const hud = selected.some(searchesHud) ? cropFrame(F,hudX,hudY,Math.ceil(F.w*.38),F.h-hudY) : null;
-    const lara = selected.find(t=>isLara(t) && t.locked===null);
+    const lara = selected.some(t=>isLara(t) && t.locked===null);
     const jobBuffX = Math.floor(F.w*.65);
-    const jobBuffHud = lara ? cropFrame(F,jobBuffX,0,F.w-jobBuffX,Math.ceil(F.h*.21)) : null;
+    const jobBuffHud = searching.some(t=>t.id.startsWith('job-')) ?
+      cropFrame(F,jobBuffX,0,F.w-jobBuffX,Math.ceil(F.h*.21)) : null;
     const laraInstallerHud = lara && (hud ?? cropFrame(F,hudX,hudY,Math.ceil(F.w*.38),F.h-hudY));
-    const runeTypes = ['rune_normal','rune_blessed','rune_cooldown'];
     const runeX = Math.floor(F.w*.53);
     const runeHud = selected.some(t => runeTypes.includes(t.id) && t.locked === null)
       ? cropFrame(F,runeX,0,F.w-runeX,Math.ceil(F.h*.24)) : null;
@@ -137,17 +168,18 @@ self.onmessage = ({ data }) => {
       const variantAt = (variant, region) => t.id.startsWith('job-')
         ? {...variant,acceptPosition:(x,y,size)=>inBuffArea(x+(region?.x ?? 0),y+(region?.y ?? 0),size)}
         : variant;
-      if (jobBuffHud && t===lara) {
-        const sizes = F.w>=1800 ? [45,44,32] : [32,31,33,30,34];
-        for (const region of [jobBuffHud,laraInstallerHud]) {
-          for (const size of sizes) {
+      if (jobBuffHud && t.id.startsWith('job-') && t.locked===null) {
+        const preferred = F.w>=1800 ? [45,44,32,46,43] : [32,31,33,30,34];
+        const sizes=[preferred[0],preferred[1+t.localSize++%(preferred.length-1)]];
+        for (const region of isLara(t) ? [jobBuffHud,laraInstallerHud] : [jobBuffHud]) {
+          for (const size of new Set(sizes)) {
             const index=t.variants.findIndex(v=>v.main.w===size);
             if (index<0) continue;
             const variant=t.variants[index];
             const hit=detect(region.frame,{
-              ...variantAt(variant,region),last:null,thr:.76,scanOptions:{coarseMin:.37,maxCands:24}
+              ...variantAt(variant,region),last:null,scanOptions:{coarseMin:.37,maxCands:24}
             });
-            if (!hit.found || (hit.score<variant.thr && hit.seconds===null)) continue;
+            if (!hit.found || hit.score<variant.thr || hit.color<.84) continue;
             hit.x+=region.x;
             hit.y+=region.y;
             variant.last={x:hit.x,y:hit.y};
@@ -295,6 +327,19 @@ self.onmessage = ({ data }) => {
       }
       return { id: t.id, ...r };
     });
+    const jobHits=results.filter(r=>r.found && r.id.startsWith('job-'));
+    const fileOf=id=>targets.find(target=>target.id===id)?.file;
+    for (const hit of jobHits) {
+      const ambiguous=jobHits.some(other=>other!==hit && fileOf(other.id)!==fileOf(hit.id) &&
+        Math.abs(other.x-hit.x)<hit.size*.4 && Math.abs(other.y-hit.y)<hit.size*.4 &&
+        other.score+other.color>=hit.score+hit.color-.06);
+      if (ambiguous) {
+        const target=targets.find(t=>t.id===hit.id);
+        if (target.locked!==null) target.variants[target.locked].last=null;
+        target.locked=null;
+        Object.assign(hit,{found:false,identity:false,seconds:null});
+      }
+    }
     const bomberAlternates = [];
     for (const result of results) {
       const target = targets.find(item => item.id === result.id);
@@ -503,7 +548,8 @@ self.onmessage = ({ data }) => {
       Object.assign(r,applyTimerFormat({...fallback,unit:'seconds'},F.timerFormat));
     }
     const monitor=data.targetIds ? null : analyzeScreen(F,results,data.t,
-      data.externalExperience || firstExperience?.value ? null : firstExperience);
+      !readExp || firstExperience?.value ? null : firstExperience);
+    if (monitor) monitor.expBuffs=readExperienceBuffs(F,data.t,dims);
     if (monitor?.exp?.value && monitor.exp.box) {
       if (!experienceBox) {
         for (const target of targets.filter(isInstaller)) target.localSize = target.cursor % target.variants.length;

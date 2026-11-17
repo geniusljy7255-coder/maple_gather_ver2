@@ -7,7 +7,7 @@ export function isAlarmEnabled(id){
   try{return localStorage.getItem('hunt_alarm_'+id)!=='0';}catch{return true;}
 }
 export function setAlarmEnabled(id,on){
-  if(!ALARM_CHANNELS.some(c=>c.id===id))return;
+  if(!ALARM_CHANNELS.some(c=>c.id===id) && !/^job-\d+:[\p{L}\p{N}_]+$/u.test(id))return;
   alarmMemory.set(id,!!on);try{localStorage.setItem('hunt_alarm_'+id,on?'1':'0');}catch{}
 }
 

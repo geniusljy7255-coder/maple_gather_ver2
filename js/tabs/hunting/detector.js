@@ -74,17 +74,26 @@ export function analyzeExperienceFrame({image,sourceHeight},t) {
 }
 
 /** targets: [{ id, thr, main:{w,h,rgba}, reject?:{w,h,rgba} }] */
-export function configure(targets) { generation++; worker?.postMessage({ type: 'config', generation, targets }); }
+export function configure(targets,experienceBuffAssets=[],captureRevision=0) {
+  generation++;
+  worker?.postMessage({type:'config',generation,targets,experienceBuffAssets,captureRevision});
+}
 
 /** 프레임 한 장을 보낸다. 이전 분석이 끝나지 않았으면 건너뛰고 false를 돌려준다. */
 export function canAnalyze(now = Date.now()) {
   return Boolean(worker) && (!busy || now - busySince >= 5000);
 }
 
-export function analyze(img, t, targetIds = null, externalExperience = false) {
+export function analyze(img, t, targetIds = null, externalExperience = false, scanRune = true, scanFragments = true, scanExperience = true) {
+  return sendFrame(img,t,{type:'frame',targetIds,externalExperience,experienceBox,scanRune,scanFragments,scanExperience});
+}
+export function analyzeBuffFrame({image,sourceWidth,sourceHeight},t) {
+  return sendFrame(image,t,{type:'buff-frame',sourceWidth,sourceHeight});
+}
+function sendFrame(img,t,fields) {
   if (!canAnalyze()) return false;
   busy = true; busySince = Date.now();
-  worker.postMessage({ type: 'frame', generation, t, targetIds, timerFormat, externalExperience, experienceBox,
+  worker.postMessage({ ...fields,generation,t,timerFormat,
     w: img.width, h: img.height, buffer: img.data.buffer }, [img.data.buffer]);
   return true;
 }

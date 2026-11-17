@@ -130,7 +130,7 @@ function renderCharCards() {
   $('charCards').innerHTML = characters.map((c, i) => {
     const b = c.basic, name = b.character_name || c.name, job = b.character_class || '-';
     return `
-      <button onclick="selectChar(${i})" class="card flex flex-col items-center gap-1 p-2.5 text-center hover:border-slate-300 ${i === selectedIdx ? '!border-indigo-500 ring-2 ring-indigo-200' : ''}">
+      <button type="button" onclick="selectChar(${i})" aria-pressed="${i === selectedIdx}" class="scheduler-character card flex flex-col items-center gap-1 p-2.5 text-center hover:border-slate-300">
         <span class="flex h-[7.5rem] w-[7.5rem] items-center justify-center overflow-hidden rounded-lg bg-white">
           <img src="${esc(b.character_image || '')}" alt="" class="h-full w-full scale-x-[-2.8] scale-y-[2.8] object-contain">
         </span>

@@ -403,3 +403,42 @@
 :root :is(.border-indigo-500, .border-indigo-600) { border-color: var(--accent); }
 :root .cb { accent-color: var(--accent); }
 :root :is(.ring-indigo-200, .focus\:ring-indigo-500:focus, .input:focus) { --tw-ring-color: var(--accent); }
+
+:root[data-theme="dark"] .input:focus {
+  background-color: var(--surface-hover);
+  color: var(--ink);
+  caret-color: var(--ink);
+}
+
+:root .scheduler-character[aria-pressed="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.hunt-volume {
+  appearance: none;
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(to right, var(--accent) var(--volume-progress, 100%), var(--line) var(--volume-progress, 100%));
+  cursor: pointer;
+}
+.hunt-volume::-webkit-slider-thumb {
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.hunt-volume::-moz-range-thumb {
+  box-sizing: border-box;
+  width: 15px;
+  height: 15px;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.hunt-volume:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; }
+#jobAlarmControls:not(:empty) { margin-top: .5rem; }

@@ -9,7 +9,7 @@ test('per-alarm mute suppresses sound and speech without suppressing event logs'
  N.notify('룬','alert','rune');assert.equal(beeps,3);assert.equal(voices,1);
  N.setAlarmEnabled('collect',true);N.notify('회수','alert','collect');assert.equal(beeps,6);assert.equal(voices,2);
 });
-const elements=new Map(),make=()=>({setAttribute(){},removeAttribute(){},style:{},classList:{toggle(){}},handlers:{},children:[],addEventListener(k,fn){this.handlers[k]=fn;},append(...n){this.children.push(...n);},replaceChildren(){this.children=[];},getContext:()=>({clearRect(){},putImageData(){}})});
+const elements=new Map(),make=()=>({setAttribute(){},removeAttribute(){},style:{setProperty(key,value){this[key]=value;}},classList:{toggle(){}},handlers:{},children:[],selectors:new Map(),addEventListener(k,fn){this.handlers[k]=fn;},append(...n){this.children.push(...n);},replaceChildren(){this.children=[];},querySelector(key){if(!this.selectors.has(key))this.selectors.set(key,make());return this.selectors.get(key);},remove(){},getContext:()=>({clearRect(){},putImageData(){}})});
 globalThis.document={hidden:false,createElement:make,getElementById:id=>elements.get(id)||null};
 const ui=await import('../js/tabs/hunting/ui.js');const S=await import('../js/tabs/hunting/session.js');
 for(const match of ui.html.matchAll(/id="([^"]+)"/g))elements.set(match[1],make());
@@ -126,4 +126,34 @@ test('confirmed installer expires and notifies once without further frame result
    assert.equal(trackers.janus.needsReinstall,true);
    assert.equal(events.filter(e=>e.channel==='janus').length,1);
  } finally {Object.assign(trackers.janus,previous);}
+});
+test('two Captain installer alerts are added, muted and removed independently',async()=>{
+ const {addJobInstaller,updateJobInstaller,removeJobInstaller,jobAlarm,jobInstallers}=await import('../js/tabs/hunting/job-installers.js');
+ const {trackers,expireInstallers}=await import('../js/tabs/hunting/trackers.js');
+ const controls=elements.get('jobAlarmControls'),events=[];
+ N.onNotify(event=>events.push(event));
+ addJobInstaller();addJobInstaller();
+ const [first,second]=jobInstallers;
+ try {
+   assert.equal(controls.children.length,0);
+   updateJobInstaller(first.id,{skill:'캡틴_배틀쉽_봄버'});
+   updateJobInstaller(second.id,{skill:'캡틴_시즈_봄버'});
+   assert.equal(controls.children.length,2);
+   const siege=controls.children[1].children[0];
+   siege.checked=false;siege.handlers.change();
+   assert.equal(N.isAlarmEnabled(jobAlarm(second).id),false);
+   assert.equal(N.isAlarmEnabled(jobAlarm(first).id),true);
+   const expiry=10000;
+   for (const item of [first,second]) trackers[item.id]={id:item.id,deadline:expiry,alerted:false};
+   expireInstallers(expiry-1);
+   assert.equal(events.filter(event=>event.channel.startsWith('job-')).length,0);
+   expireInstallers(expiry);expireInstallers(expiry+1000);
+   assert.deepEqual(events.filter(event=>event.channel.startsWith('job-')).map(event=>[event.text,event.muted]),
+     [['배틀쉽 재설치',false],['시즈봄버 재설치',true]]);
+   removeJobInstaller(first.id);
+   assert.equal(controls.children.length,1);
+   assert.equal(controls.children[0].children[1],'시즈봄버');
+ } finally {
+   for (const item of [first,second]) {delete trackers[item.id];removeJobInstaller(item.id);}
+ }
 });

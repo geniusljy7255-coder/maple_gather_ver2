@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHuntModel,beginHunt,finishHunt,observeExperience,observeFragments} from '../js/tabs/hunting/hunt-model.js';
-import {createRuneState,updateRune,cooldownSeconds,runePresentation} from '../js/tabs/hunting/rune-state.js';
+import {createRuneState,updateRune,cooldownSeconds,runePresentation,runeScanInterval} from '../js/tabs/hunting/rune-state.js';
+import {observeExperienceBuff,experienceBuffGroups} from '../js/tabs/hunting/experience-buffs.js';
+import {createExperienceBuffDetector,scanExperienceBuffs,matchesUnionColor} from '../js/tabs/hunting/experience-buff-detector.js';
 import {freshState,advance} from '../js/tabs/hunting/tracking-state.js';
 import {parseExperience,readScreenText} from '../js/tabs/hunting/screen-text.js';
 import {applyTimerFormat,readDigits} from '../js/tabs/hunting/digits.js';
@@ -417,6 +419,152 @@ test('a confirmed minute rune timer rejects spurious short centered seconds',()=
  assert.equal(cooldownSeconds(10,null,'seconds').seconds,10);
  assert.equal(cooldownSeconds(10,null,'minutes').seconds,600);
 });
+test('confirmed rune cooldown stays in PiP despite later colored buff candidates',()=>{
+ const s=createRuneState();
+ const gray=(seconds)=>({id:'rune_cooldown',found:true,chroma:{},unit:'seconds',seconds,confidence:1,x:100,y:16,size:32});
+ for (const t of [1000,1500]) updateRune(s,[gray(223)],t);
+ const deadline=s.cooldownDeadline;
+ for (const t of [20000,21000]) updateRune(s,[{...gray(203),id:'rune_normal',x:135}],t);
+ assert.equal(s.buffDeadline,0);
+ assert.equal(s.cooldownDeadline,deadline);
+ assert.equal(runePresentation(s,21500).seconds,203);
+ assert.equal(runePresentation(s,21500).approx,false);
+ assert.equal(runeScanInterval(s,21500),30000);
+ s.cooldownApprox=true;
+ assert.equal(runeScanInterval(s,21500),30000);
+ s.cooldownSamples.push({n:203,t:21500});
+ assert.equal(runeScanInterval(s,21500),0);
+ s.cooldownApprox=false;
+ assert.equal(runeScanInterval(s,deadline-8000),0);
+ for (const t of [deadline+100,deadline+600]) updateRune(s,[{...gray(120),id:'rune_normal'}],t);
+ assert.ok(s.buffDeadline>deadline);
+ s.cooldownDeadline=s.buffDeadline+600000;
+ assert.equal(runeScanInterval(s,s.buffDeadline-8000),0);
+});
+
+test('experience buff groups keep individual deadlines and replace only confirmed mutually exclusive buffs',()=>{
+ const active=(file,seconds,approx=false,multiplier=null)=>({file,seconds,approx,multiplier});
+ const confirm=(state,hit,t)=>observeExperienceBuff(observeExperienceBuff(state,hit,t),hit,t+500);
+ let bonus=confirm(null,active('mvp50',1800,true),1000);
+ const multiplier=confirm(null,active('coupon',1800,true,3),6000);
+ assert.equal(experienceBuffGroups.length,8);
+ assert.equal(multiplier.multiplier,3);
+ assert.equal(multiplier.deadline-bonus.deadline,5000);
+ bonus=observeExperienceBuff(bonus,active('mvp70',1800,true),10000);
+ assert.equal(bonus.file,'mvp50');
+ bonus=observeExperienceBuff(bonus,active('mvp70',1800,true),10500);
+ assert.equal(bonus.file,'mvp70');
+ bonus=observeExperienceBuff(bonus,active('mvp70',599),1211000);
+ assert.equal(bonus.approx,false);
+ assert.equal(bonus.deadline,1810000);
+ assert.equal(multiplier.deadline,1806500);
+});
+test('experience buff HUD reads two icons with separate visible minute timers',()=>{
+ const assets=[['bonus','추가_경험치_50%'],['vip','VIP_버프_경험치']].map(([group,file])=>({
+  group,file,main:readPNG(new URL('../icon/buff/'+encodeURIComponent(file)+'.png',import.meta.url))
+ }));
+ const w=640,h=420;
+ const createFrame=(withVip,withTimer=true)=>{
+  const rgba=new Uint8ClampedArray(w*h*4);
+  for (const [i,{main}] of assets.entries()) {
+   if (i && !withVip) continue;
+   const x=510+i*42;
+   for(let y=0;y<32;y++)rgba.set(main.rgba.subarray(y*128,(y+1)*128),((y+10)*w+x)*4);
+   if(!withTimer) continue;
+   if(!i) for(let y=33;y<42;y++) for(let col=0;col<32;col++){
+    rgba.set([24,35,52,255],(y*w+x+col)*4);
+   }
+   const digits=i ? ['11110/00001/00001/01110/00001/00001/11110','01110/10001/10011/10101/11001/10001/01110'] :
+     ['01110/10001/00001/00010/00100/01000/11111','01110/10001/10001/01111/00001/00001/01110'];
+   for(const [j,glyph] of digits.entries())for(const [y,row] of glyph.split('/').entries()) {
+    for(const [col,bit] of [...row].entries()) {
+     rgba.set(bit==='1'?[255,255,255,255]:[30,30,30,255],((y+(i?32:34))*w+x+(i?3:1)+j*6+col)*4);
+    }
+   }
+  }
+  return prepareFrame(rgba,w,h);
+ };
+ const crop=(frame,x,y,width,height)=>{
+  const rgba=new Uint8ClampedArray(width*height*4);
+  for(let row=0;row<height;row++){
+   const from=((y+row)*frame.w+x)*4;
+   rgba.set(frame.rgba.subarray(from,from+width*4),row*width*4);
+  }
+  return {frame:prepareFrame(rgba,width,height)};
+ };
+ const detector=createExperienceBuffDetector(assets);
+ const originalTemplate=makeTemplate(assets[0].main.rgba,32,32,'wide-timer');
+ const originalHit=detect(createFrame(false),{main:originalTemplate,thr:.86,minColor:.86,last:{x:510,y:10}},
+   {allowScan:false,trackRadius:0});
+ assert.equal(originalHit.found,false);
+ for(const t of [1000,1500,5000,5500]) scanExperienceBuffs(detector,createFrame(t>=5000),t,crop);
+ assert.equal(detector.records.bonus.deadline,1741500);
+ assert.equal(detector.records.vip.deadline,1805500);
+ assert.equal(detector.records.bonus.approx,true);
+ const untimed=createExperienceBuffDetector(assets);
+ for(const t of [1000,4000,7000]) scanExperienceBuffs(untimed,createFrame(true,false),t,crop);
+ assert.equal(untimed.records.bonus.seenAt,7000);
+ assert.equal(untimed.records.bonus.sample,null);
+ assert.ok(Object.values(untimed.records).every(record=>record.deadline===0));
+ const quick=createExperienceBuffDetector(assets);
+ scanExperienceBuffs(quick,createFrame(false,false),1000,crop);
+ const x=Math.floor(w*.48);
+ const {frame:region}=crop(createFrame(true),x,0,w-x,Math.ceil(h*.18));
+ region.sourceWidth=w;
+ scanExperienceBuffs(quick,region,1750,crop,true);
+ assert.equal(quick.records.bonus.sample.seconds,1740);
+ assert.equal(quick.records.vip,undefined);
+ scanExperienceBuffs(quick,region,2500,crop,true);
+ assert.equal(quick.records.bonus.deadline,1742500);
+ const couponOnly=createExperienceBuffDetector([assets[0],{...assets[0],group:'multiplier',file:'multiplier'}]);
+ for(const t of [1000,1500]) scanExperienceBuffs(couponOnly,createFrame(false),t,crop);
+ assert.ok(couponOnly.records.bonus.deadline>0);
+ assert.ok(!(couponOnly.records.multiplier?.deadline>0));
+ const ambiguous=createExperienceBuffDetector([
+  {...assets[0],group:'experience-potion',file:'experience-potion'},
+  {...assets[0],group:'wealth-potion',file:'wealth-potion'}
+ ]);
+ // Only one group is due, but its rival artwork must still be checked at the same slot.
+ ambiguous.checked['wealth-potion']=1000;
+ for(const t of [1000,1500]) scanExperienceBuffs(ambiguous,createFrame(false),t,crop);
+ assert.equal(ambiguous.records['experience-potion']?.deadline,0);
+});
+test('union buffs require different artwork colors despite identical countdowns',()=>{
+ const w=32,rgba=new Uint8ClampedArray(w*w*4);
+ const fill=(color)=>{
+  for(let p=0;p<rgba.length;p+=4) rgba.set(color,p);
+  for(let y=13;y<20;y++)for(let x=10;x<23;x++)rgba.set([255,226,0,255],(y*w+x)*4);
+ };
+ const frame={w,rgba};
+ fill([210,155,45,255]);
+ assert.equal(matchesUnionColor(frame,0,0,w,'wealth'),true);
+ assert.equal(matchesUnionColor(frame,0,0,w,'luck'),false);
+ fill([90,173,56,255]);
+ assert.equal(matchesUnionColor(frame,0,0,w,'luck'),true);
+ assert.equal(matchesUnionColor(frame,0,0,w,'wealth'),false);
+ fill([128,128,128,255]);
+ assert.equal(matchesUnionColor(frame,0,0,w,'wealth'),false);
+ assert.equal(matchesUnionColor(frame,0,0,w,'luck'),false);
+});
+test('unused buffs back off to twelve seconds between searches',()=>{
+ const icon=readPNG(new URL('../icon/buff/VIP_버프_경험치.png',import.meta.url));
+ const detector=createExperienceBuffDetector([{group:'vip',file:'vip',main:icon}]);
+ const frame=prepareFrame(new Uint8ClampedArray(192*192*4),192,192);
+ let scans=0;
+ const crop=()=>{scans++;return {frame};};
+ for(const t of [1000,2000,4000,5000,10000,15000,21000,22000]) scanExperienceBuffs(detector,frame,t,crop);
+ assert.equal(scans,4);
+ assert.equal(detector.checked.vip,22000);
+ assert.equal(detector.records.vip,undefined);
+});
+test('compact white minute OCR accepts two thin digits in the lower left',()=>{
+ const size=32,rgba=new Uint8ClampedArray(size*size*4);
+ for(let y=24;y<29;y++){
+  for(const x of [2,7])rgba.set([223,224,230,255],(y*size+x)*4);
+ }
+ const reading=readDigits(rgba,size,{area:[0,.64,.42,.96],min:10,minuteLabel:true,minGlyphHeight:.14,light:true});
+ assert.equal(reading.seconds,11);
+});
 
 test('event bar OCR separates 6, 8, 3, 5 and 9 at seven pixels high',()=>{
  const glyphs=[
@@ -468,6 +616,7 @@ test('repeated high-digit OCR errors do not replace EXP when the percent stays f
   const {exp}=analyzeScreen(mistaken,[],time);
   assert.match(exp.text,/^38,009,778,803,410/);
   assert.equal(exp.value,null);
+  assert.equal(exp.recheck,true);
  }
  assert.equal(analyzeScreen(prepareFrame(screenshot.rgba,w,h),[],2800).exp.value.raw,'38003778803410');
  for(let y=786;y<=791;y++) {
@@ -531,6 +680,8 @@ test('countdown OCR converts minute and second notation without changing plain s
  assert.equal(read('540').seconds,540);
  assert.equal(read('540',{clockOnly:true}).seconds,null);
  assert.equal(read('5:40',{clockOnly:true}).seconds,340);
+ assert.equal(read('1100',{longTimer:true,area:[0,0,1,1]}).seconds,1100);
+ assert.equal(read('30:00',{longTimer:true,area:[0,0,1,1]}).seconds,1800);
  assert.equal(cooldownSeconds(14,null,'minutes').seconds,840);
 });
 
