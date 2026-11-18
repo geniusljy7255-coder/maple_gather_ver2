@@ -1,6 +1,7 @@
 import {fetchCharacterAppearance} from './core/nexon.js';
 import {getSchedulerCharacters} from './tabs/scheduler.js';
 import {onCompanionSpeech,onVoiceStart} from './core/notify.js';
+import {mapFooting} from './companion-footing.js';
 
 const settingsKey='ddangkaera-character-companion';
 const mapKey='ddangkaera-companion-map';
@@ -11,10 +12,21 @@ const chairScale=72/41;
 const apiKeyName='nexon_api_key';
 const refreshMs=24*60*60*1000;
 const frameMs=130;
+// Positions are relative to the exported map's top-left corner.
+const spiritTreeRopes=[
+  {x:522,left:249,right:571,rise:300},
+  {x:2790,left:2319,right:2821,rise:420}
+];
+const walkConnection=0, jumpConnection=1;
+const footingCosts=[1,12,3,3];
+const footingY=([left,y,right,endY],x)=>y+(endY-y)*Math.max(0,Math.min(1,(x-left)/(right-left)));
 const platforms={
-  crane:{width:1241,height:698,maxWidth:745,left:380,right:930,y:437},
-  mapleHill:{width:1818,height:1022,maxWidth:1000,left:175,right:1190,y:925},
-  temple:{width:1952,height:544,left:110,right:1842,y:371,centered:true}
+  spiritTree:{width:3326,height:880,left:110,right:3216,y:704,foregroundTop:269,centered:true},
+  eurel:{width:3984,height:1650,left:110,right:3874,y:1460,foregroundTop:783,centered:true},
+  edelstein:{width:4588,height:1841,left:130,right:4458,y:1651,foregroundTop:180,centered:true},
+  ludibrium:{width:5385,height:1428,left:130,right:5255,y:1230,foregroundTop:142,centered:true},
+  kerning:{width:3870,height:1540,left:475,right:3395,y:1366,foregroundTop:132,centered:true},
+  nautilus:{width:4613,height:1557,left:130,right:4483,y:1505,foregroundTop:252,centered:true}
 };
 const idleLines=[
   '같이 산책하니까 좋다.',
@@ -140,10 +152,13 @@ export function mountCharacterCompanion(trigger){
       <label>방문 캐릭터 닉네임 <input name="visitors" type="text" maxlength="200" placeholder="닉네임을 쉼표로 구분" autocomplete="off"></label>
       <label>맵
         <select name="map">
-          <option value="arcana">아르카나</option>
-          <option value="crane">커닝시티 크레인</option>
-          <option value="mapleHill">단풍나무 언덕</option>
-          <option value="temple">현혹의 신전</option>
+          <option value="none">없음</option>
+          <option value="nautilus">노틸러스</option>
+          <option value="ludibrium">루디브리엄</option>
+          <option value="spiritTree">아르카나 : 정령의 나무가 있는 곳</option>
+          <option value="edelstein">에델슈타인</option>
+          <option value="eurel">요정의 숲 : 에우렐</option>
+          <option value="kerning">커닝시티</option>
         </select>
       </label>
       <div class="companion-chair-setting">
@@ -222,7 +237,7 @@ export function mountCharacterCompanion(trigger){
     if (!load.disabled) apply.disabled=false;
   });
   if (selectedChair!==defaultChair) loadChairs();
-  let selectedMap='arcana';
+  let selectedMap='spiritTree';
   try {
     const savedMap=localStorage.getItem(mapKey);
     if ([...mapSelect.options].some(option=>option.value===savedMap)) selectedMap=savedMap;
@@ -230,9 +245,7 @@ export function mountCharacterCompanion(trigger){
   ground.dataset.map=selectedMap;
   mapSelect.value=selectedMap;
   mapSelect.addEventListener('change',()=>{
-    ground.dataset.map=mapSelect.value;
-    try {localStorage.setItem(mapKey,mapSelect.value);} catch {}
-    alignScene();
+    if (!load.disabled) apply.disabled=false;
   });
   const load=find('[data-load]'), apply=find('[data-apply]'), summon=find('[data-summon]');
   const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
@@ -244,6 +257,12 @@ export function mountCharacterCompanion(trigger){
   let guestFrames=null,visitorX=0,menuForVisitor=false,idleCount=0,lastIdle=-1;
   let guestTimer=0,guestAnimation=0,standingTimer=0,standingIndex=0,greeted=false;
   const cachedVisitors=new Map();
+  const upperPlatforms=new Map();
+  const footingPositions=new Map();
+  const ropeImages=new WeakMap();
+  const jumpImages=new WeakMap();
+  const ladderImages=new WeakMap();
+  const swimImages=new WeakMap();
   let pose='walk';
   const canWalk=()=>settings?.visible && frames.length && !document.hidden && !reducedMotion.matches &&
     pose==='walk' && menu.hidden;
@@ -270,6 +289,8 @@ export function mountCharacterCompanion(trigger){
     visitPending=false;
     visitorKept=false;
     visitor.hidden=true;
+    upperPlatforms.delete(visitor);
+    footingPositions.delete(visitor);
     visitorBalloon.hide();
     guestFrames=null;
     if (menuForVisitor) menu.hidden=true;
@@ -301,6 +322,7 @@ export function mountCharacterCompanion(trigger){
       visitor.dataset.direction=visitorX<offset ? 'right' : 'left';
       guestFrames=guest.images;
       setVisitorPose('walk');
+      setElevation(visitor,0);
       visitorBalloon.name.textContent=guest.name+' :';
       visitor.replaceChildren(visitorChair,...guestFrames,visitorBalloon.node,visitorHitbox);
       visitor.hidden=false;
@@ -327,6 +349,13 @@ export function mountCharacterCompanion(trigger){
     clearTimeout(guestTimer);
     cancelAnimationFrame(guestAnimation);
     guestAnimation=0;
+    settleFooting(visitor);
+    setElevation(visitor);
+    ropeImages.get(guestFrames)?.frames?.forEach(frame=>{frame.hidden=true;});
+    jumpImages.get(guestFrames)?.frames?.forEach(frame=>{frame.hidden=true;});
+    ladderImages.get(guestFrames)?.frames?.forEach(frame=>{frame.hidden=true;});
+    swimImages.get(guestFrames)?.frames?.forEach(frame=>{frame.hidden=true;});
+    delete visitor.dataset.swimming;
     if (visitor.dataset.pose==='walk') showGuestFrame(0);
   }
   function sendVisitorAway(){
@@ -338,6 +367,13 @@ export function mountCharacterCompanion(trigger){
     clearTimeout(timer);
     cancelAnimationFrame(animation);
     animation=0;
+    settleFooting(sprite);
+    setElevation(sprite);
+    ropeImages.get(frames)?.frames?.forEach(frame=>{frame.hidden=true;});
+    jumpImages.get(frames)?.frames?.forEach(frame=>{frame.hidden=true;});
+    ladderImages.get(frames)?.frames?.forEach(frame=>{frame.hidden=true;});
+    swimImages.get(frames)?.frames?.forEach(frame=>{frame.hidden=true;});
+    delete sprite.dataset.swimming;
     showFrame(pose==='sit' ? 5 : pose==='prone' ? 6 : 0);
   }
   function rest(duration){
@@ -359,32 +395,227 @@ export function mountCharacterCompanion(trigger){
       scheduleStationarySpeech();
     },12000+Math.random()*8000);
   }
-  function walkBounds(){
+  function setElevation(character,rise=footingPositions.get(character)?.rise ?? upperPlatforms.get(character)?.rise ?? 0){
+    const width=document.documentElement.clientWidth;
+    character.style.setProperty('--companion-elevation',rise*width/(platforms[ground.dataset.map]?.width ?? width)+'px');
+  }
+  function getMovementImages(images,character,cache,actions){
+    if (!cache.has(images)) {
+      const state={frames:null};
+      cache.set(images,state);
+      Promise.all(actions.map(action=>loadFrame(images[0].src,action))).then(loaded=>{
+        state.frames=loaded;
+        if ((character===sprite ? frames : guestFrames)===images) character.append(...loaded);
+      }).catch(()=>{});
+    }
+    const loaded=cache.get(images).frames;
+    if (loaded && loaded[0].parentElement!==character) character.append(...loaded);
+    return loaded;
+  }
+  function walkBounds(upper){
     const width=document.documentElement.clientWidth;
     const platform=platforms[ground.dataset.map];
     if (platform) {
       const scale=Math.min(width,platform.maxWidth ?? width)/platform.width;
       const start=(width-scale*platform.width)/(platform.centered ? 2 : 1);
-      return {left:start+platform.left*scale,right:start+platform.right*scale};
+      return {left:start+(upper?.left ?? platform.left)*scale,right:start+(upper?.right ?? platform.right)*scale};
     }
     const margin=Math.min(80,width/3);
     return {left:margin,right:width-margin};
   }
+  function placeFooting(character,x){
+    const map=platforms[ground.dataset.map];
+    const screenX=x*document.documentElement.clientWidth/map.width;
+    if (character===visitor) visitorX=screenX;
+    else offset=screenX;
+    character.style.setProperty('--companion-x',screenX+'px');
+  }
+  function settleFooting(character){
+    const position=footingPositions.get(character);
+    if (position) placeFooting(character,position.x);
+  }
+  function planFootingRoute(footing,position,poses,map){
+    const {surfaces}=footing;
+    const queues=[[position.id]];
+    const costs=new Map([[position.id,0]]);
+    const previous=new Map([[position.id,null]]);
+    for (let cost=0;cost<queues.length;cost++) {
+      for (const from of queues[cost] ?? []) {
+        if (cost!==costs.get(from)) continue;
+        for (const connection of surfaces[from][4]) {
+          const [to,kind]=connection;
+          if (kind!==walkConnection && !poses[kind]) continue;
+          const nextCost=cost+footingCosts[kind];
+          if (nextCost>=(costs.get(to) ?? Infinity)) continue;
+          costs.set(to,nextCost);
+          previous.set(to,{from,connection});
+          (queues[nextCost] ??= []).push(to);
+        }
+      }
+    }
+    const candidates=[...previous.keys()].slice(1);
+    const currentY=footingY(surfaces[position.id],position.x);
+    const distant=candidates.filter(id=>{
+      const [left,y,right]=surfaces[id];
+      return Math.abs((left+right)/2-position.x)>map.width*.25 || Math.abs(y-currentY)>map.height*.23;
+    });
+    const destinations=distant.length ? distant : candidates;
+    let goal=destinations[Math.floor(Math.random()*destinations.length)];
+    const route=[];
+    while (goal!==undefined && goal!==position.id) {
+      const {from,connection}=previous.get(goal);
+      route.push(connection);
+      goal=from;
+    }
+    return route.reverse();
+  }
+  function walkOnFooting(guest,footing,continuedAt){
+    const character=guest ? visitor : sprite;
+    const images=guest ? guestFrames : frames;
+    const displayFrame=guest ? showGuestFrame : showFrame;
+    const allowed=guest ? guestCanWalk : canWalk;
+    const mapName=ground.dataset.map;
+    const map=platforms[mapName];
+    const scale=document.documentElement.clientWidth/map.width;
+    let position=footingPositions.get(character);
+    if (!position) {
+      const x=(guest ? visitorX : offset)/scale;
+      const id=footing.start.find(id=>x>=footing.surfaces[id][0] && x<=footing.surfaces[id][2]) ?? footing.start[0];
+      const [left,,right]=footing.surfaces[id];
+      position={id,x:Math.max(left,Math.min(right,x)),rise:0,route:[]};
+      footingPositions.set(character,position);
+    }
+    const current=footing.surfaces[position.id];
+    const inWater=surface=>mapName==='nautilus' && surface[1]===map.y && surface[3]===map.y;
+    const swimming=inWater(current);
+    const swim=mapName==='nautilus' ? getMovementImages(images,character,swimImages,['A05.0','A05.1']) : null;
+    const riseAt=(surface,x)=>map.y-footingY(surface,x)+(inWater(surface) ? 62 : 0);
+    const poses=[
+      null,
+      getMovementImages(images,character,jumpImages,['A06.0']),
+      mapName!=='eurel' ? getMovementImages(images,character,ropeImages,['A09.0','A09.1']) : null,
+      mapName!=='eurel' ? getMovementImages(images,character,ladderImages,['A08.0','A08.1']) : null
+    ];
+    if (!position.route.length) position.route=planFootingRoute(footing,position,poses,map);
+    const [id,kind,takeoff,landing]=position.route[0] ??
+      [position.id,walkConnection,(current[0]+current[2])/2,(current[0]+current[2])/2];
+    const target=footing.surfaces[id];
+    const startX=position.x;
+    const startRise=riseAt(current,takeoff);
+    const endRise=riseAt(target,landing);
+    const walkTime=Math.abs(takeoff-startX)*scale*(swimming ? 11 : 9);
+    const moveTime=kind===walkConnection ? 0 : kind===jumpConnection ? 600 : Math.max(850,Math.abs(endRise-startRise)*scale*11);
+    const motion=poses[kind];
+    function showSwim(elapsed){
+      if (!swim) {
+        displayFrame(0);
+        return;
+      }
+      character.dataset.swimming='';
+      for (const frame of images) frame.hidden=true;
+      swim.forEach((frame,index)=>{frame.hidden=index!==Math.floor(elapsed/230)%swim.length;});
+    }
+    let start=continuedAt;
+    function next(){
+      const id=requestAnimationFrame(step);
+      if (guest) guestAnimation=id;
+      else animation=id;
+    }
+    function step(now){
+      if (guest) guestAnimation=0;
+      else animation=0;
+      if (!allowed()) return;
+      start ??= now;
+      const elapsed=now-start;
+      if (elapsed<walkTime) {
+        const x=startX+(takeoff-startX)*elapsed/walkTime;
+        position.x=x;
+        position.rise=riseAt(current,x);
+        character.dataset.direction=takeoff<startX ? 'left' : 'right';
+        placeFooting(character,x);
+        setElevation(character,position.rise+(swimming ? Math.sin(now/190)*9 : 0));
+        if (swimming) showSwim(now);
+        else displayFrame(1+Math.floor(now/frameMs)%4);
+      } else if (elapsed<walkTime+moveTime) {
+        const progress=(elapsed-walkTime)/moveTime;
+        const jumping=kind===jumpConnection;
+        const arc=jumping ? 4*progress*(1-progress)*35 : 0;
+        const liftProgress=jumping ? progress : progress*progress*(3-2*progress);
+        position.x=takeoff;
+        position.rise=startRise;
+        placeFooting(character,takeoff+(landing-takeoff)*progress);
+        setElevation(character,startRise+(endRise-startRise)*liftProgress+arc);
+        swim?.forEach(frame=>{frame.hidden=true;});
+        delete character.dataset.swimming;
+        if (landing!==takeoff) character.dataset.direction=landing<takeoff ? 'left' : 'right';
+        for (const frame of images) frame.hidden=true;
+        motion.forEach((frame,index)=>{frame.hidden=index!==Math.floor((elapsed-walkTime)/200)%motion.length;});
+      } else {
+        const route=position.route.slice(1);
+        footingPositions.set(character,{id,x:landing,rise:endRise,route});
+        placeFooting(character,landing);
+        setElevation(character);
+        motion?.forEach(frame=>{frame.hidden=true;});
+        if (inWater(target)) showSwim(now);
+        else {
+          swim?.forEach(frame=>{frame.hidden=true;});
+          delete character.dataset.swimming;
+          displayFrame(route.length ? 1+Math.floor(now/frameMs)%4 : 0);
+        }
+        if (route.length) {
+          const nextStart=Math.max(now-32,start+walkTime+moveTime);
+          walkOnFooting(guest,footing,nextStart);
+          return;
+        }
+        const delay=1000+Math.random()*2200;
+        if (guest) {
+          guestTimer=setTimeout(()=>walk(true),delay);
+        } else if (inWater(target)) {
+          timer=setTimeout(walk,delay);
+        } else rest(delay);
+        return;
+      }
+      next();
+    }
+    next();
+  }
   function walk(guest=false){
     const allowed=guest ? guestCanWalk : canWalk;
     if (!allowed()) return;
+    const footing=mapFooting[ground.dataset.map];
+    if (footing) {
+      walkOnFooting(guest,footing);
+      return;
+    }
+    const character=guest ? visitor : sprite;
+    const images=guest ? guestFrames : frames;
+    const displayFrame=guest ? showGuestFrame : showFrame;
     const from=guest ? visitorX : offset;
-    const {left,right}=walkBounds();
-    const minDistance=Math.min(96,(right-left)/3);
+    const upper=upperPlatforms.get(character);
+    const {left,right}=walkBounds(upper);
+    const map=ground.dataset.map;
+    const width=document.documentElement.clientWidth;
+    const scale=width/(platforms[map]?.width ?? width);
+    const jumpingFrames=getMovementImages(images,character,jumpImages,['A06.0']);
+    const climbingFrames=map==='spiritTree'
+      ? getMovementImages(images,character,ropeImages,['A09.0','A09.1']) : null;
+    const rope=climbingFrames && Math.random()<(upper ? .5 : .3)
+      ? upper ?? spiritTreeRopes[Math.floor(Math.random()*spiritTreeRopes.length)] : null;
+    const jump=!rope && jumpingFrames && Math.random()<.1
+      ? {x:from/scale,rise:0} : null;
+    const transition=jump || rope;
+    const minDistance=(right-left)*.27;
     const leftRange=Math.max(0,from-minDistance-left);
     const rightRange=Math.max(0,right-from-minDistance);
-    if (!leftRange && !rightRange) return;
+    if (!transition && !leftRange && !rightRange) return;
     const choice=Math.random()*(leftRange+rightRange);
-    const to=choice<leftRange ? left+choice : from+minDistance+choice-leftRange;
-    if (from===to) return;
-    const duration=Math.max(400,Math.abs(to-from)*9);
-    const character=guest ? visitor : sprite;
-    const displayFrame=guest ? showGuestFrame : showFrame;
+    const landing=transition ? transition.x*scale : null;
+    const takeoff=jump ? Math.max(left,Math.min(right,landing-100*scale)) : landing;
+    const to=transition ? takeoff : choice<leftRange ? left+choice : from+minDistance+choice-leftRange;
+    if (!transition && from===to) return;
+    const duration=Math.abs(to-from)<1 ? 0 : Math.max(400,Math.abs(to-from)*9);
+    const transitionDuration=jump ? 600 : rope ? Math.max(850,rope.rise*scale*11) : 0;
+    const transitionFrames=jump ? jumpingFrames : climbingFrames;
     character.dataset.direction=to<from ? 'left' : 'right';
     let start;
     function nextFrame(){
@@ -398,18 +629,37 @@ export function mountCharacterCompanion(trigger){
       if (!allowed()) return;
       start ??= now;
       const elapsed=now-start;
-      const x=from+(to-from)*Math.min(1,elapsed/duration);
+      const progress=transition ? Math.max(0,Math.min(1,(elapsed-duration)/transitionDuration)) : 0;
+      const x=elapsed<duration ? from+(to-from)*elapsed/duration : jump ? to+(landing-to)*progress : to;
       if (guest) visitorX=x;
       else offset=x;
       character.style.setProperty('--companion-x',x+'px');
-      if (elapsed>=duration) {
+      if (transition && elapsed>=duration && elapsed<duration+transitionDuration) {
+        const arc=jump ? 4*progress*(1-progress)*35 : 0;
+        const rise=transition.rise ? transition.rise*(upper ? 1-progress : progress) : upper?.rise ?? 0;
+        setElevation(character,rise+arc);
+        if (jump && landing!==to) character.dataset.direction=landing<to ? 'left' : 'right';
+        for (const frame of images) frame.hidden=true;
+        transitionFrames.forEach((frame,index)=>{
+          frame.hidden=index!==Math.floor((elapsed-duration)/200)%transitionFrames.length;
+        });
+        nextFrame();
+      } else if (elapsed>=duration+transitionDuration) {
+        if (transition) {
+          if (transition.rise) {
+            if (upper) upperPlatforms.delete(character);
+            else upperPlatforms.set(character,transition);
+          }
+          setElevation(character);
+          transitionFrames.forEach(frame=>{frame.hidden=true;});
+        }
         const delay=2500+Math.random()*3000;
         if (guest) {
           showGuestFrame(0);
           guestTimer=setTimeout(()=>walk(true),delay);
         } else rest(delay);
       } else {
-        displayFrame(1+Math.floor(elapsed/frameMs)%4);
+        displayFrame(1+Math.floor(now/frameMs)%4);
         nextFrame();
       }
     }
@@ -420,7 +670,7 @@ export function mountCharacterCompanion(trigger){
     stopGuestWalk();
     clearInterval(standingTimer);
     sprite.hidden=!settings?.visible || !frames.length;
-    ground.hidden=sprite.hidden;
+    ground.hidden=sprite.hidden || ground.dataset.map==='none';
     document.body.classList.toggle('companion-visible',!sprite.hidden);
     document.body.dataset.companionMap=sprite.hidden ? '' : ground.dataset.map;
     if (sprite.hidden || document.hidden) {
@@ -444,8 +694,8 @@ export function mountCharacterCompanion(trigger){
     if (!sprite.hidden && !document.hidden && !reducedMotion.matches) {
       standingTimer=setInterval(()=>{
         const frame=standingFrames[++standingIndex%standingFrames.length];
-        if (pose==='walk' && !animation) showFrame(frame);
-        if (!visitor.hidden && visitor.dataset.pose==='walk' && !guestAnimation) showGuestFrame(frame);
+        if (pose==='walk' && !animation && !('swimming' in sprite.dataset)) showFrame(frame);
+        if (!visitor.hidden && visitor.dataset.pose==='walk' && !guestAnimation && !('swimming' in visitor.dataset)) showGuestFrame(frame);
       },330);
     }
     if (!greeted && !sprite.hidden && !document.hidden) {
@@ -456,6 +706,8 @@ export function mountCharacterCompanion(trigger){
   function install(images){
     stop();
     stopVisits();
+    upperPlatforms.delete(sprite);
+    footingPositions.delete(sprite);
     balloon.hide();
     frames=images;
     activeFrame=0;
@@ -554,6 +806,7 @@ export function mountCharacterCompanion(trigger){
   }
   trigger.addEventListener('click',()=>{
     loadChairs();
+    mapSelect.value=ground.dataset.map;
     if (chairs) {
       chairSelect.value=selectedChair;
       renderChairPreview();
@@ -637,15 +890,25 @@ export function mountCharacterCompanion(trigger){
     const savedKey=localStorage.getItem(apiKeyName) || '';
     const visitors=[...new Set(visitorNames.value.split(/[,，\n]/).map(value=>value.trim()).filter(Boolean))]
       .filter(visitorName=>visitorName!==name).slice(0,10);
-    if (chairs?.[chairSelect.value] && chairSelect.value!==selectedChair) {
+    const mapChanged=mapSelect.value!==ground.dataset.map;
+    const chairChanged=chairs?.[chairSelect.value] && chairSelect.value!==selectedChair;
+    if (mapChanged) {
+      ground.dataset.map=mapSelect.value;
+      upperPlatforms.clear();
+      footingPositions.clear();
+      try {localStorage.setItem(mapKey,mapSelect.value);} catch {}
+      alignScene();
+    }
+    if (chairChanged) {
       selectedChair=chairSelect.value;
       try {localStorage.setItem(chairKey,selectedChair);} catch {}
       renderChair();
-      if (!name || (name===settings?.name && keyInput===savedKey &&
-          JSON.stringify(visitors)===JSON.stringify(settings.visitors ?? []))) {
-        status.textContent='의자를 적용했어.';
-        return;
-      }
+    }
+    if ((mapChanged || chairChanged) && (!name || (name===settings?.name && keyInput===savedKey &&
+        JSON.stringify(visitors)===JSON.stringify(settings.visitors ?? [])))) {
+      status.textContent=mapChanged && chairChanged ? '맵과 의자를 적용했어.' :
+        mapChanged ? '맵을 적용했어.' : '의자를 적용했어.';
+      return;
     }
     const existing=name===settings?.name && frames.length && keyInput===savedKey
       ? {appearance:{name:settings.name,image:settings.image},images:frames,key:keyInput}
@@ -678,11 +941,14 @@ export function mountCharacterCompanion(trigger){
     }
     const lift=platform ? (platform.height-platform.y)*Math.min(width,platform.maxWidth ?? width)/platform.width-14 : 0;
     document.body.style.setProperty('--companion-lift',lift+'px');
+    const foregroundHeight=platform ? (platform.height-platform.foregroundTop)*width/platform.width : 0;
+    document.body.style.setProperty('--companion-foreground-height',foregroundHeight+'px');
     for(const character of [sprite,visitor]) character.style.setProperty('--companion-lift',lift+'px');
-    const {left,right}=walkBounds();
+    const {left,right}=walkBounds(upperPlatforms.get(sprite));
     offset=frames.length ? Math.max(left,Math.min(right,offset)) : right;
     if (!visitor.hidden) {
-      visitorX=Math.max(left,Math.min(right,visitorX));
+      const guestBounds=walkBounds(upperPlatforms.get(visitor));
+      visitorX=Math.max(guestBounds.left,Math.min(guestBounds.right,visitorX));
       visitor.style.setProperty('--companion-x',visitorX+'px');
     }
     place();
