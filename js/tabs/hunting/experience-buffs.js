@@ -16,6 +16,23 @@ export const experienceBuffHud = (w,h) => ({x:Math.floor(w*.48),h:Math.ceil(h*.1
 export const experienceBuffPending = (record,now) => record?.deadline<=now &&
   Number.isFinite(record.pendingSince) && now-record.pendingSince<=6500 && now-record.seenAt<=6500;
 
+export function summarizeExperienceBuffs(records,now){
+  const active=Object.values(records ?? {}).filter(record=>record.deadline>now)
+    .sort((a,b)=>a.deadline-b.deadline);
+  let largest=[];
+  for(let i=0;i<active.length;i++){
+    const group=[];
+    for(let j=i;j<active.length;j++){
+      const maxGap=active[i].approx || active[j].approx ? 90000 : 45000;
+      if(active[j].deadline-active[i].deadline<=maxGap)group.push(active[j]);
+    }
+    if(group.length>largest.length)largest=group;
+  }
+  const exact=largest.filter(record=>!record.approx);
+  const representative=exact.length ? exact : largest;
+  return representative[Math.floor(representative.length/2)] ?? null;
+}
+
 export async function loadExperienceBuffAssets(){
   const loaded=await Promise.all(experienceBuffGroups.flatMap(group=>group.files.map(async file=>{
     try {

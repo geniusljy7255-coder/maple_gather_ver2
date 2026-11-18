@@ -309,14 +309,25 @@ export function analyzeScreen(F,results,now,earlyExperience){
     let reading;
     // Read the narrow count row before wider crops that can include game effects.
     {
-      for (const offset of [1,0,2,-1,3,-2]) {
+      const since=fragmentConfirmed;
+      const candidates=new Map();
+      for (const offset of [1,0,2,-1,3,-2,4]) {
         const band = {x:icon.x-icon.size*.15,y:icon.y+icon.size*1.29+offset,w:icon.size*1.3,h:Math.max(6,Math.round(icon.size*.24))};
-        for (const tone of ['fragment','purple','dim']) {
+        for (const tone of ['fragment','fragment-dim','fragment-soft','purple']) {
           const result = readScreenText(F,band,tone);
-          if (/^\d{1,6}$/.test(result.text) && result.confidence>=.83 &&
-              (!reading || result.confidence>reading.confidence)) reading=result;
+          if (!/^\d{1,6}$/.test(result.text) || result.confidence<.83) continue;
+          const candidate=candidates.get(result.text) ?? {reading:result,tones:new Set()};
+          candidate.tones.add(tone);
+          if(result.confidence>candidate.reading.confidence) candidate.reading=result;
+          candidates.set(result.text,candidate);
+          if(result.confidence>=.98 && candidate.tones.size>=2){reading=result;break;}
         }
-        if (reading?.confidence>=.97) break;
+        if (reading) break;
+      }
+      if(!reading){
+        const score=({reading,tones})=>reading.confidence+Math.min(tones.size-1,2)*.025+
+          (since!==null && Number(reading.text)===since+1 ? .012 : 0);
+        reading=[...candidates.values()].sort((a,b)=>score(b)-score(a))[0]?.reading;
       }
     }
     for (const [offset, height] of [[0,10],[1,7],[2,7],[3,7],[-1,8],[-3,8],[4,8],[6,8]]) {

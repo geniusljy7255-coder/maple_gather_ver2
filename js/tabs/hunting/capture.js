@@ -2,6 +2,7 @@
 import { stats } from './diag.js';
 import { companionSay, notify } from '../../core/notify.js';
 import {experienceBuffHud} from './experience-buffs.js';
+import {vipBoosterRegion} from './vip-booster.js';
 
 let stream = null, track = null, video = null, reader = null;
 let latest = null;                    // 가장 최근 프레임 (VideoFrame)
@@ -114,7 +115,9 @@ export function grabExperienceFrame() {
 export function grabBuffFrame() {
   if (!video || video.readyState<2 || !video.videoWidth || !video.videoHeight) return null;
   const sourceWidth=video.videoWidth,sourceHeight=video.videoHeight;
-  const {x,h}=experienceBuffHud(sourceWidth,sourceHeight);
+  const hud=experienceBuffHud(sourceWidth,sourceHeight);
+  const timer=vipBoosterRegion(sourceWidth,sourceHeight);
+  const x=Math.min(hud.x,timer.x),h=Math.max(hud.h,timer.y+timer.h);
   const image=grabVideoRegion(buffShot,x,0,sourceWidth-x,h);
   return image ? {image,sourceWidth,sourceHeight} : null;
 }

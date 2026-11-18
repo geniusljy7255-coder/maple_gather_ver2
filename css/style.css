@@ -745,3 +745,33 @@ body.companion-visible #page { position: relative; z-index: 1; }
 }
 .hunt-volume:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; }
 #jobAlarmControls:not(:empty) { margin-top: .5rem; }
+
+.hunt-exp-buff-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 3fr);
+  gap: .5rem;
+}
+.hunt-exp-buff-summary {
+  display: grid;
+  justify-items: center;
+  gap: .25rem;
+  text-align: center;
+}
+.hunt-booster-icons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  align-content: center;
+  gap: .375rem;
+}
+.hunt-booster-icons img {
+  width: 2rem;
+  height: 2rem;
+  object-fit: contain;
+}
+.hunt-exp-buff-items {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+  gap: .5rem;
+}

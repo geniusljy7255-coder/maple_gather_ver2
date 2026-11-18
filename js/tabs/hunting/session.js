@@ -1,4 +1,5 @@
 import { companionSay, notify } from '../../core/notify.js';
+import { observeVipBooster } from './vip-booster.js';
 import { createHuntModel, beginHunt, finishHunt, observeExperience, observeFragments } from './hunt-model.js';
 import { createRuneState, updateRune } from './rune-state.js';
 const HISTORY_KEY='hunt_history_v1', LS_SEC='hunt_collect_sec', LS_ENABLED='hunt_collect_enabled';
@@ -11,7 +12,7 @@ try { const v=JSON.parse(localStorage.getItem(HISTORY_KEY)||'[]');
     (!r.startExp||(r.startExp.percent===null||Number.isFinite(r.startExp.percent)))&&(!r.endExp||(r.endExp.percent===null||Number.isFinite(r.endExp.percent)))).slice(0,10);
 } catch {}
 export const state={hunt:createHuntModel(saved),collect:{sec:sanitizeSec(localStorage.getItem(LS_SEC)),repeat:true,deadline:0,pausedLeft:null,enabled:localStorage.getItem(LS_ENABLED)!=='0'},
-  rune:createRuneState(),vision:{exp:null,fragments:null,assets:[],error:'',lastAt:0}};
+  rune:createRuneState(),booster:{deadline:0,sample:null,confirmedAt:0},vision:{exp:null,fragments:null,assets:[],error:'',lastAt:0}};
 function persist(){try{localStorage.setItem(HISTORY_KEY,JSON.stringify(state.hunt.history));state.hunt.storageError=false;}catch{state.hunt.storageError=true;}}
 export function startHunt(now=Date.now(),restarting=false) {
   if(state.hunt.running || state.hunt.pausedAt !== null) stopHunt(now,'다시 측정');
@@ -82,6 +83,9 @@ export const collectLeftMs=(now=Date.now())=> !state.collect.enabled ? null : st
   ? Math.max(0,state.collect.deadline-now) : state.collect.pausedLeft;
 export function handleMonitor(msg){
   if(msg.monitor){
+    if ('vipBooster' in msg.monitor && observeVipBooster(state.booster,msg.monitor.vipBooster,msg.t)) {
+      state.booster.confirmedAt=msg.t;
+    }
     state.vision={...state.vision,...msg.monitor,lastAt:msg.t};
     const count=msg.monitor.fragments?.value;
     if (count != null) state.vision.fragmentsReadAt = msg.t;
@@ -102,8 +106,17 @@ export function handleMonitor(msg){
   if(msg.type!=='experience-ready' && msg.type!=='buff-ready' && updateRune(state.rune,msg.results,msg.t))notify('룬이 나타났습니다','alert','rune');
 }
 const announcedBuffDeadlines=new Map();
-export function captureEnded(){state.hunt.lastExp=null;state.hunt.fragmentBaseline=null;state.hunt.latestFragments=null;state.rune=createRuneState();state.vision.expBuffs={};state.vision.lastAt=0;state.vision.fragmentsReadAt=0;announcedBuffDeadlines.clear();}
+export function captureEnded(){state.hunt.lastExp=null;state.hunt.fragmentBaseline=null;state.hunt.latestFragments=null;state.rune=createRuneState();state.booster={deadline:0,sample:null,confirmedAt:0};state.vision.expBuffs={};state.vision.lastAt=0;state.vision.fragmentsReadAt=0;announcedBuffDeadlines.clear();}
 export function tick(now=Date.now()){
+  const booster=state.booster;
+  if(booster.deadline && now>=booster.deadline){
+    const confirmedNearEnd=booster.deadline-booster.confirmedAt<=5000;
+    state.booster={deadline:0,sample:null,confirmedAt:0};
+    if(confirmedNearEnd){
+      notify('부스터 종료','alert','booster');
+      companionSay('부스터가 끝났어!');
+    }
+  }
   const c=state.collect;
   if(c.enabled&&state.hunt.running&&c.deadline&&now>=c.deadline){notify('회수하세요','alert','collect');c.deadline+= (Math.floor((now-c.deadline)/(c.sec*1000))+1)*c.sec*1000;}
   let buffExpired=false;

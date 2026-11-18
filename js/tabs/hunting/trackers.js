@@ -182,7 +182,8 @@ function submitFrame(now) {
     const waiting = Object.values(trackers).filter(tr => tr.needsReinstall ||
       (tr.deadline === null && tr.recoveryUntil > now));
     const pending=Object.values(sessionState.vision.expBuffs ?? {}).some(record=>experienceBuffPending(record,now));
-    if (pending && now-lastBuffGrab>=750 && (!waiting.length || lastBuffGrab<=lastGrab)) {
+    const interval=pending || sessionState.booster.deadline>now ? 750 : 1250;
+    if (now-lastBuffGrab>=interval && (!waiting.length || lastBuffGrab<=lastGrab)) {
       const frame=grabBuffFrame();
       if (frame && analyzeBuffFrame(frame,now)) {lastBuffGrab=now;return;}
     }

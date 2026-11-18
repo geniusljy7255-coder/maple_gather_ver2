@@ -25,7 +25,8 @@ function readMinutes(hit,main){
   const minute={min:10,longTimer:true,aligned:true,minuteLabel:true,light:true,minGlyphHeight:.14};
   for (const area of [[.02,.63,.64,1],[0,.66,.55,.99],[.02,.63,.47,.97],[.095,.69,.46,.92],
     [0,.64,.42,.96],[.025,.70,.39,.98]]) {
-    for (const options of [{background:main.rgba},{lightThreshold:215},{background:main.rgba,lightThreshold:175}]) {
+    for (const options of [{background:main.rgba},{lightThreshold:215},{background:main.rgba,lightThreshold:175},
+      {background:main.rgba,lightThreshold:128},{lightThreshold:180}]) {
       const reading=readDigits(preview,size,{...minute,...options,area});
       if (Number.isInteger(reading.seconds) && reading.seconds>=10 &&
           reading.seconds<=180 && reading.confidence>=.85) return reading.seconds;
@@ -61,7 +62,9 @@ function readTimer(hit,main,format){
   }
   const minutes=readMinutes(hit,main);
   if (minutes!==null) return {seconds:minutes*60,approx:true};
-  for (const options of [{...center,background:main.rgba},center,{...center,faintYellow:true,background:main.rgba}]) {
+  for (const options of [{...center,background:main.rgba},center,{...center,faintYellow:true,background:main.rgba},
+    {...center,area:[.01,.22,.99,.82],faintYellow:true,background:main.rgba,minGlyphHeight:.14},
+    {...center,area:[.06,.29,.94,.73],faintYellow:true,minGlyphHeight:.14}]) {
     const reading=applyTimerFormat(readDigits(preview,size,options),format);
     if (acceptable(reading)) return {seconds:reading.seconds,approx:false};
   }
@@ -146,8 +149,8 @@ export function scanExperienceBuffs(detector,frame,now,cropFrame,onlyPending=fal
   const due=assets.filter(asset=>{
     const record=records[asset.group];
     const pending=experienceBuffPending(record,now);
-    if (onlyPending && !pending) return false;
     const active=record?.deadline>now;
+    if (onlyPending && !pending && !(active && record.deadline-now<=12000)) return false;
     const interval=active
       ? (record.deadline-now<=12000 ? 450 : 30000)
       : pending ? 450 : 3000*2**Math.max(0,(misses[asset.group] ?? 0)-1);

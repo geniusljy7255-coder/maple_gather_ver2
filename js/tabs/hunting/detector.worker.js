@@ -4,6 +4,8 @@ import { makeTemplate, prepareFrame, detect, resizeIcon } from './matcher.js';
 import { applyTimerFormat, readDigits } from './digits.js';
 import { analyzeExperience, analyzeScreen, resetScreenMonitor } from './screen-monitor.js';
 import {createExperienceBuffDetector,scanExperienceBuffs} from './experience-buff-detector.js';
+import {experienceBuffHud} from './experience-buffs.js';
+import {readVipBooster,vipBoosterRegion} from './vip-booster.js';
 
 const SIZES = [32, 45, 44, 24, 28, 20, 26, 30, 22, 18, 16, 34, 36, 40, 48, 64];
 // Keep the common sizes first, then cover intermediate UI scales.
@@ -81,10 +83,15 @@ self.onmessage = ({ data }) => {
     const t0 = performance.now();
     if (data.type==='buff-frame') {
       const frame=prepareFrame(new Uint8ClampedArray(data.buffer),data.w,data.h);
-      frame.sourceWidth=data.sourceWidth;
       frame.timerFormat=data.timerFormat;
-      const expBuffs=readExperienceBuffs(frame,data.t,data.sourceWidth+'x'+data.sourceHeight,true);
-      postMessage({type:'buff-ready',generation,t:data.t,ms:performance.now()-t0,results:[],monitor:{expBuffs}});
+      const timer=vipBoosterRegion(data.sourceWidth,data.sourceHeight);
+      const hud=experienceBuffHud(data.sourceWidth,data.sourceHeight);
+      const origin=data.sourceWidth-data.w;
+      const buffFrame=cropFrame(frame,hud.x-origin,0,data.sourceWidth-hud.x,hud.h).frame;
+      buffFrame.sourceWidth=data.sourceWidth;
+      const expBuffs=readExperienceBuffs(buffFrame,data.t,data.sourceWidth+'x'+data.sourceHeight,true);
+      const vipBooster=readVipBooster(cropFrame(frame,timer.x-origin,timer.y,timer.w,timer.h).frame);
+      postMessage({type:'buff-ready',generation,t:data.t,ms:performance.now()-t0,results:[],monitor:{expBuffs,vipBooster}});
       return;
     }
     if (data.type!=='frame') return;
@@ -549,7 +556,11 @@ self.onmessage = ({ data }) => {
     }
     const monitor=data.targetIds ? null : analyzeScreen(F,results,data.t,
       !readExp || firstExperience?.value ? null : firstExperience);
-    if (monitor) monitor.expBuffs=readExperienceBuffs(F,data.t,dims);
+    if (monitor) {
+      const timer=vipBoosterRegion(F.w,F.h);
+      monitor.expBuffs=readExperienceBuffs(F,data.t,dims);
+      monitor.vipBooster=readVipBooster(cropFrame(F,timer.x,timer.y,timer.w,timer.h).frame);
+    }
     if (monitor?.exp?.value && monitor.exp.box) {
       if (!experienceBox) {
         for (const target of targets.filter(isInstaller)) target.localSize = target.cursor % target.variants.length;

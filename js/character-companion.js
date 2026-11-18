@@ -12,6 +12,7 @@ const chairScale=72/41;
 const apiKeyName='nexon_api_key';
 const refreshMs=24*60*60*1000;
 const frameMs=130;
+const jumpDurationMs=380;
 // Positions are relative to the exported map's top-left corner.
 const spiritTreeRopes=[
   {x:522,left:249,right:571,rise:300},
@@ -254,6 +255,7 @@ export function mountCharacterCompanion(trigger){
   let listed=[],candidate=null,frames=[],activeFrame=0,offset=0;
   let timer=0,animation=0,request=0,hasRested=false;
   let visitTimer=0,visitRevision=0,visitPending=false,visitorKept=false;
+  let visitorLeaving=false;
   let guestFrames=null,visitorX=0,menuForVisitor=false,idleCount=0,lastIdle=-1;
   let guestTimer=0,guestAnimation=0,standingTimer=0,standingIndex=0,greeted=false;
   const cachedVisitors=new Map();
@@ -266,7 +268,7 @@ export function mountCharacterCompanion(trigger){
   let pose='walk';
   const canWalk=()=>settings?.visible && frames.length && !document.hidden && !reducedMotion.matches &&
     pose==='walk' && menu.hidden;
-  const guestCanWalk=()=>!visitor.hidden && !document.hidden && !reducedMotion.matches &&
+  const guestCanWalk=()=>!visitor.hidden && !visitorLeaving && !document.hidden && !reducedMotion.matches &&
     visitor.dataset.pose==='walk' && menu.hidden;
 
   function save(){
@@ -288,6 +290,7 @@ export function mountCharacterCompanion(trigger){
     visitRevision++;
     visitPending=false;
     visitorKept=false;
+    visitorLeaving=false;
     visitor.hidden=true;
     upperPlatforms.delete(visitor);
     footingPositions.delete(visitor);
@@ -327,6 +330,7 @@ export function mountCharacterCompanion(trigger){
       visitor.replaceChildren(visitorChair,...guestFrames,visitorBalloon.node,visitorHitbox);
       visitor.hidden=false;
       visitorBalloon.show('잠깐 놀러 왔어!');
+      speak('반가워!');
       guestTimer=setTimeout(()=>walk(true),1800);
       visitTimer=setTimeout(sendVisitorAway,30000);
     } catch {
@@ -359,8 +363,20 @@ export function mountCharacterCompanion(trigger){
     if (visitor.dataset.pose==='walk') showGuestFrame(0);
   }
   function sendVisitorAway(){
-    stopVisits();
-    queueVisit(45000+Math.random()*45000);
+    if (visitor.hidden || visitorLeaving) return;
+    visitorLeaving=true;
+    clearTimeout(visitTimer);
+    stopGuestWalk();
+    if (menuForVisitor) menu.hidden=true;
+    if (!document.hidden) {
+      visitorBalloon.show('잘있어!');
+      speak('조심히가!');
+    }
+    visitTimer=setTimeout(()=>{
+      stopVisits();
+      queueVisit(45000+Math.random()*45000);
+      sync();
+    },2300);
     sync();
   }
   function stop(){
@@ -504,7 +520,7 @@ export function mountCharacterCompanion(trigger){
     const startRise=riseAt(current,takeoff);
     const endRise=riseAt(target,landing);
     const walkTime=Math.abs(takeoff-startX)*scale*(swimming ? 11 : 9);
-    const moveTime=kind===walkConnection ? 0 : kind===jumpConnection ? 600 : Math.max(850,Math.abs(endRise-startRise)*scale*11);
+    const moveTime=kind===walkConnection ? 0 : kind===jumpConnection ? jumpDurationMs : Math.max(850,Math.abs(endRise-startRise)*scale*11);
     const motion=poses[kind];
     function showSwim(elapsed){
       if (!swim) {
@@ -614,7 +630,7 @@ export function mountCharacterCompanion(trigger){
     const to=transition ? takeoff : choice<leftRange ? left+choice : from+minDistance+choice-leftRange;
     if (!transition && from===to) return;
     const duration=Math.abs(to-from)<1 ? 0 : Math.max(400,Math.abs(to-from)*9);
-    const transitionDuration=jump ? 600 : rope ? Math.max(850,rope.rise*scale*11) : 0;
+    const transitionDuration=jump ? jumpDurationMs : rope ? Math.max(850,rope.rise*scale*11) : 0;
     const transitionFrames=jump ? jumpingFrames : climbingFrames;
     character.dataset.direction=to<from ? 'left' : 'right';
     let start;
@@ -727,6 +743,7 @@ export function mountCharacterCompanion(trigger){
   }
   onCompanionSpeech(speak);
   onVoiceStart(({text,channel})=>{
+    if (channel==='booster') return;
     const line=alarmLines[text] ?? ((channel==='janus' || channel==='fountain' || channel.startsWith('job-'))
       ? text.replace(/ 재설치$/,' 시간이 끝나버렸어') : text);
     speak(line);
@@ -744,7 +761,7 @@ export function mountCharacterCompanion(trigger){
       return event.clientX>=left && event.clientX<=right && event.clientY>=top && event.clientY<=bottom;
     };
     const hitsMain=contains(hitbox);
-    const hitsVisitor=!visitor.hidden && contains(visitorHitbox);
+    const hitsVisitor=!visitor.hidden && !visitorLeaving && contains(visitorHitbox);
     if (!hitsVisitor && !hitsMain) return;
     menuForVisitor=hitsVisitor && (!hitsMain || Math.abs(event.clientX-visitorX)<Math.abs(event.clientX-offset));
     event.preventDefault();

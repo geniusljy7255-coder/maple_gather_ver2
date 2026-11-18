@@ -104,8 +104,10 @@ export function readScreenText(F,box,tone='white', mergeGaps=false){
       bits[y*w+x] = low>112 && high>168 && low>=high*.61 ? 1 : 0;
       continue;
     }
-    if (tone === 'fragment') {
-      bits[y*w+x] = Math.min(r,g,b)>155 ? 1 : 0;
+    if (tone.startsWith('fragment')) {
+      bits[y*w+x] = tone==='fragment-soft'
+        ? r>=132 && g>=105 && b>=150 && b>=g*.93 ? 1 : 0
+        : Math.min(r,g,b)>(tone==='fragment-dim' ? 132 : 155) ? 1 : 0;
       continue;
     }
     bits[y*w+x]=tone==='purple'?(r>135&&b>150&&g>65&&g<r*.95?1:0):Math.min(r,g,b)>(tone==='dim'?125:155)&&Math.max(r,g,b)-Math.min(r,g,b)<65?1:0;
@@ -270,12 +272,13 @@ export function readScreenText(F,box,tone='white', mergeGaps=false){
       }
       native.clear();
     }
-    if (tone === 'fragment') {
+    if (tone.startsWith('fragment')) {
       const nativeRanked = compare(fragmentGlyphs(),native);
       const ranked = nativeRanked[0][1]>=.95 ? nativeRanked : compare(glyphBank().filter(g=>/^\d$/.test(g.char)),scores);
-      if (ranked[0][1]<.80 || ranked[0][1]-ranked[1][1]<.025) {text+='?';continue;}
-      text+=ranked[0][0];
-      confidence=Math.min(confidence,ranked[0][1]);
+      const corrected=distinguishSimilarExperienceDigits(ranked,n);
+      if (corrected[0][1]<.80 || corrected[0][1]-corrected[1][1]<.025) {text+='?';continue;}
+      text+=corrected[0][0];
+      confidence=Math.min(confidence,corrected[0][1]);
       continue;
     }
     const trained=compare(nativeGlyphs(),native);

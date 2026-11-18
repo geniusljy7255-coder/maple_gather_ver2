@@ -1,6 +1,6 @@
 /* 알림: 효과음 + (선택) 음성 */
 const VOICE_KEY = 'hunt_voice';
-export const ALARM_CHANNELS=[{id:'collect',label:'아이템 회수'},{id:'rune',label:'룬 출현'},{id:'janus',label:'솔 야누스'},{id:'fountain',label:'에르다 파운틴'}];
+export const ALARM_CHANNELS=[{id:'collect',label:'아이템 회수'},{id:'rune',label:'룬 출현'},{id:'janus',label:'솔 야누스'},{id:'fountain',label:'에르다 파운틴'},{id:'booster',label:'VIP 부스터'}];
 const alarmMemory=new Map();
 export function isAlarmEnabled(id){
   if(alarmMemory.has(id))return alarmMemory.get(id);

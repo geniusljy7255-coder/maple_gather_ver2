@@ -1,7 +1,7 @@
 import { getTimerFormat, setTimerFormat } from './detector.js';
 import { jobInstallers, jobSkill, jobIconFile, installerIcon, jobAlarm, onJobInstallersChange } from './job-installers.js';
 import {runePresentation} from './rune-state.js';
-import {experienceBuffGroups,experienceBuffIcon} from './experience-buffs.js';
+import {experienceBuffGroups,experienceBuffIcon,summarizeExperienceBuffs} from './experience-buffs.js';
 /* 사냥 도우미: 화면 구성 · 이벤트 연결 · 렌더링 */
 import { $, setText } from '../../core/dom.js';
 import { formatHMS, formatMS } from '../../core/format.js';
@@ -15,6 +15,12 @@ const BTN_DANGER = 'rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white
 const BTN_GHOST = 'rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-100';
 const HUNT_BUTTON_SIZE = 'inline-size:6rem;block-size:2.25rem;padding:0;font-size:.75rem;white-space:nowrap';
 const SURFACE = { window: '창', monitor: '전체 화면', browser: '브라우저 탭' };
+const boosterIcons = [
+  ['vip_부스터.png', 'VIP 부스터'],
+  ['HEXA_부스터.png', 'HEXA 부스터'],
+  ['수상한_돋보기_부스터.png', '수상한 돋보기 부스터'],
+  ['탐정예티의_수상한_돋보기_부스터.png', '탐정예티의 수상한 돋보기 부스터']
+];
 
 const dashCard = (label, valueHtml) => `
   <div class="card text-center"><div class="label mb-1 flex min-h-6 items-center justify-center">${label}</div>${valueHtml}</div>`;
@@ -135,7 +141,21 @@ export const html = `
 
 <section class="panel">
   <h2 class="panel-h"><span><span class="dot"></span>경험치 버프</span></h2>
-  <div class="grid grid-cols-2 gap-2 md:grid-cols-4">
+  <div class="hunt-exp-buff-layout">
+    <div class="card hunt-exp-buff-summary">
+      <span class="label">VIP 부스터</span>
+      <strong id="hunt-vip-booster" class="text-2xl tabular-nums">--:--</strong>
+    </div>
+    <div class="card hunt-exp-buff-summary">
+      <span class="label">종합 남은 시간</span>
+      <strong id="hunt-exp-buff-total" class="text-2xl tabular-nums">--:--</strong>
+    </div>
+    <div class="card hunt-booster-icons">
+      ${boosterIcons.map(([file,label])=>`
+        <img src="${new URL('../../../icon/hunting/'+file,import.meta.url).href}" width="32" height="32" alt="${label}" title="${label}">
+      `).join('')}
+    </div>
+    <div class="hunt-exp-buff-items">
     ${experienceBuffGroups.map(({id,label,files})=>`
       <div class="card flex items-center justify-between gap-2">
         <span class="flex min-w-0 items-center gap-2">
@@ -145,6 +165,7 @@ export const html = `
         <span id="exp-buff-time-${id}" class="hint shrink-0 tabular-nums">--:--</span>
       </div>
     `).join('')}
+    </div>
   </div>
 </section>
 `;
@@ -568,6 +589,10 @@ function renderMeasurements(now){
     '시작 '+(h.fragmentStart === null ? '—' : h.fragmentStart+'개')+
     ' → 현재 '+(h.latestFragments === null ? '—' : h.latestFragments+'개'));
   const rune=runePresentation(r,now);
+  const summary=sharing ? summarizeExperienceBuffs(v.expBuffs,now) : null;
+  setText('hunt-exp-buff-total',summary ? formatBuffTime(summary.deadline-now,summary.approx) : '--:--');
+  const boosterLeft=S.state.booster.deadline-now;
+  setText('hunt-vip-booster',sharing && boosterLeft>0 ? formatMS(boosterLeft) : '--:--');
   for (const {id,label,files} of experienceBuffGroups) {
     const buff=sharing ? v.expBuffs?.[id] : null;
     const active=buff?.deadline>now;
