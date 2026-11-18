@@ -105,6 +105,18 @@ export function readScreenText(F,box,tone='white', mergeGaps=false){
       continue;
     }
     if (tone.startsWith('fragment')) {
+      if (tone==='fragment-outline') {
+        if(Math.min(r,g,b)<145 || Math.max(r,g,b)-Math.min(r,g,b)>57)continue;
+        let dark=0;
+        for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
+          const xx=x+x0+dx,yy=y+y0+dy;
+          if(xx<0 || xx>=F.w || yy<0 || yy>=F.h || (!dx && !dy))continue;
+          const q=(yy*F.w+xx)*4;
+          if(Math.max(F.rgba[q],F.rgba[q+1],F.rgba[q+2])<=92)dark++;
+        }
+        bits[y*w+x]=dark>=2 ? 1 : 0;
+        continue;
+      }
       bits[y*w+x] = tone==='fragment-soft'
         ? r>=132 && g>=105 && b>=150 && b>=g*.93 ? 1 : 0
         : Math.min(r,g,b)>(tone==='fragment-dim' ? 132 : 155) ? 1 : 0;

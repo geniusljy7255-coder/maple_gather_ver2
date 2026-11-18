@@ -11,7 +11,10 @@ export function readVipBooster({rgba,w,h}){
   const ink=new Uint8Array(w*h);
   for(let i=0;i<ink.length;i++){
     const r=rgba[i*4],g=rgba[i*4+1],b=rgba[i*4+2];
-    ink[i]=r>=178 && g>=125 && g>=r*.64 && g-b>=64;
+    // The glossy upper strokes can be nearly white, while the lower strokes are gold.
+    const gold=r>=178 && g>=115 && g>=r*.58 && g-b>=55;
+    const highlight=Math.min(r,g,b)>=211 && Math.max(r,g,b)-Math.min(r,g,b)<=47;
+    ink[i]=gold || highlight;
   }
   const inkIn=(x,y,width,height)=>{
     let count=0;

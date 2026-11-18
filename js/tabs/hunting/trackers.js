@@ -165,6 +165,13 @@ function submitFrame(now) {
     if (frame && analyzeExperienceFrame(frame,now)) lastExperienceGrab=now;
   }
   if (!canAnalyze(now)) return;
+  if (!lastBuffGrab && experienceBuffAssets.length) {
+    const frame=grabBuffFrame();
+    if (frame && analyzeBuffFrame(frame,now)) {
+      lastBuffGrab=now;
+      return;
+    }
+  }
   if (now < fastUntil || (now < initialExpUntil &&
       ((!externalExperience && !sessionState.hunt.lastExp) || sessionState.hunt.latestFragments === null))) {
     if (now-lastGrab < 250) return;
@@ -182,7 +189,7 @@ function submitFrame(now) {
     const waiting = Object.values(trackers).filter(tr => tr.needsReinstall ||
       (tr.deadline === null && tr.recoveryUntil > now));
     const pending=Object.values(sessionState.vision.expBuffs ?? {}).some(record=>experienceBuffPending(record,now));
-    const interval=pending || sessionState.booster.deadline>now ? 750 : 1250;
+    const interval=pending ? 500 : sessionState.booster.deadline>now ? 750 : 1250;
     if (now-lastBuffGrab>=interval && (!waiting.length || lastBuffGrab<=lastGrab)) {
       const frame=grabBuffFrame();
       if (frame && analyzeBuffFrame(frame,now)) {lastBuffGrab=now;return;}

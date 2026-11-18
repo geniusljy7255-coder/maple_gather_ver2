@@ -1,7 +1,7 @@
 import {crop,imageData} from './monitor-assets.js';
 
 export const experienceBuffGroups=[
-  {id:'multiplier',label:'경험치 배율',files:['경험치_x배']},
+  {id:'multiplier',label:'경험치 배율',files:['경험치_x배','경험치_4배','MVP_경험치_3배','MVP_경험치_5배']},
   {id:'bonus',label:'추가 경험치',files:['MVP_추가_경험치_50%','MVP_추가_경험치_70%','추가_경험치_50%']},
   {id:'vip',label:'VIP 버프 경험치',files:['VIP_버프_경험치']},
   {id:'luck',label:'유니온의 행운',files:['유니온의_행운']},
@@ -14,7 +14,7 @@ export const experienceBuffGroups=[
 export const experienceBuffIcon = file => new URL('../../../icon/buff/'+encodeURIComponent(file)+'.png',import.meta.url).href;
 export const experienceBuffHud = (w,h) => ({x:Math.floor(w*.48),h:Math.ceil(h*.18)});
 export const experienceBuffPending = (record,now) => record?.deadline<=now &&
-  Number.isFinite(record.pendingSince) && now-record.pendingSince<=6500 && now-record.seenAt<=6500;
+  Number.isFinite(record.pendingSince) && now-record.seenAt<=6500;
 
 export function summarizeExperienceBuffs(records,now){
   const active=Object.values(records ?? {}).filter(record=>record.deadline>now)
@@ -39,7 +39,7 @@ export async function loadExperienceBuffAssets(){
       const image=await imageData(experienceBuffIcon(file));
       const size=Math.min(image.width,image.height);
       const main=crop(image,Math.floor((image.width-size)/2),Math.floor((image.height-size)/2),size,size);
-      if (group.id==='multiplier') {
+      if (file==='경험치_x배') {
         // The W on the reference icon is replaced by the in-game multiplier.
         for(let y=Math.floor(size*.09);y<Math.ceil(size*.32);y++) {
           for(let x=Math.floor(size*.60);x<Math.ceil(size*.90);x++) main.rgba[(y*size+x)*4+3]=0;

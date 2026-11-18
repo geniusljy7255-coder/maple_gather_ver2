@@ -248,8 +248,8 @@ export function scanMarker(F,t) {
 export function detect(F, target, { allowScan = true, trackRadius = 3 } = {}) {
   const { main, reject, thr } = target;
   const accept = (c, need = thr) => {
-    if (target.acceptPosition && !target.acceptPosition(c.x,c.y,main.w)) return false;
     if (c.s < need) return false;
+    if (target.acceptPosition && !target.acceptPosition(c.x,c.y,main.w)) return false;
     if (target.colorMode) {
       c.chroma = iconChroma(F, main, c.x, c.y);
       const coloredRune = c.chroma.blue >= .30 && c.chroma.mean >= .14;

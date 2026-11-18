@@ -143,7 +143,7 @@ export const html = `
   <h2 class="panel-h"><span><span class="dot"></span>경험치 버프</span></h2>
   <div class="hunt-exp-buff-layout">
     <div class="card hunt-exp-buff-summary">
-      <span class="label">VIP 부스터</span>
+      <span class="label">부스터</span>
       <strong id="hunt-vip-booster" class="text-2xl tabular-nums">--:--</strong>
     </div>
     <div class="card hunt-exp-buff-summary">

@@ -48,12 +48,12 @@ function trackInCrop(frame,variant,radius,variantAt) {
 const windowCooldown = makeTemplate(WINDOW_RUNE_COOLDOWN.rgba,32,32,true);
 
 const isBuff = target => target.id !== 'rune_marker' && target.id !== 'fragments_icon';
-function readExperienceBuffs(frame,now,dimensions,onlyPending=false) {
+function readExperienceBuffs(frame,now,dimensions,onlyPending=false,cropped=onlyPending) {
   if (buffDimensions!==dimensions) {
     buffDimensions=dimensions;
     for (const asset of buffDetector.assets) asset.last=null;
   }
-  return scanExperienceBuffs(buffDetector,frame,now,cropFrame,onlyPending);
+  return scanExperienceBuffs(buffDetector,frame,now,cropFrame,onlyPending,cropped);
 }
 
 self.onmessage = ({ data }) => {
@@ -89,7 +89,7 @@ self.onmessage = ({ data }) => {
       const origin=data.sourceWidth-data.w;
       const buffFrame=cropFrame(frame,hud.x-origin,0,data.sourceWidth-hud.x,hud.h).frame;
       buffFrame.sourceWidth=data.sourceWidth;
-      const expBuffs=readExperienceBuffs(buffFrame,data.t,data.sourceWidth+'x'+data.sourceHeight,true);
+      const expBuffs=readExperienceBuffs(buffFrame,data.t,data.sourceWidth+'x'+data.sourceHeight,false,true);
       const vipBooster=readVipBooster(cropFrame(frame,timer.x-origin,timer.y,timer.w,timer.h).frame);
       postMessage({type:'buff-ready',generation,t:data.t,ms:performance.now()-t0,results:[],monitor:{expBuffs,vipBooster}});
       return;

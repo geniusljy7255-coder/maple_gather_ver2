@@ -81,7 +81,7 @@ export function applyTimerFormat(reading,format) {
   return reading;
 }
 
-let runeCooldownTemplates,minuteLabelTemplates;
+let runeCooldownTemplates,minuteLabelTemplates,buffSecondsTemplates;
 export function readDigits(rgba,size,options={}) {
   const mask=new Uint8Array(size*size);
   const area=options.area||[.125,.1875,.875,.8125];
@@ -98,6 +98,15 @@ export function readDigits(rgba,size,options={}) {
         ? Math.min(r,g,b)>(options.lightThreshold ?? 150) && Math.max(r,g,b)-Math.min(r,g,b)<100
         : options.goldTimer ? yellow && g >= r*.87 : yellow;
     if (!selected) continue;
+    if (options.outlinedLight) {
+      let outline=false;
+      for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
+        if(x+dx<0 || x+dx>=size || y+dy<0 || y+dy>=size)continue;
+        const q=((y+dy)*size+x+dx)*4;
+        outline ||= Math.max(rgba[q],rgba[q+1],rgba[q+2])<95;
+      }
+      if(!outline)continue;
+    }
     const base = options.background;
     if (base && base[p+3]>=128) {
       const br=base[p], bg=base[p+1], bb=base[p+2];
@@ -179,6 +188,10 @@ export function readDigits(rgba,size,options={}) {
           })),
           {digit:1,...normalize(new Uint8Array(5).fill(1),1,5)}
         ])
+      : options.buffSeconds
+      ? (buffSecondsTemplates ??= [...getTemplates(),...RUNE_COOLDOWN_GLYPHS,
+          ...SCREEN_GLYPHS.filter(g=>g.h<=8 && /^\d$/.test(g.char)).map(g=>({...g,digit:Number(g.char)}))]
+          .map(g=>typeof g.bits==='string' ? {...g,...normalize(Uint8Array.from(g.bits,Number),g.w,g.h)} : g))
       : options.runeCooldown || clockLayout
       ? (runeCooldownTemplates ??= [...getTemplates(),...RUNE_COOLDOWN_GLYPHS.map(g=>({
           digit:g.digit,...normalize(Uint8Array.from(g.bits,Number),g.w,g.h)
@@ -210,8 +223,24 @@ export function readDigits(rgba,size,options={}) {
         scores[t.digit]=Math.max(scores[t.digit],2*intersection/Math.max(1,total)-Math.abs(glyph.aspect-t.aspect)*.12);
       }
     }
+    if(options.minuteLabel || options.buffSeconds) {
+      const middle=Array.from({length:4},(_,x)=>glyph.bits[5*10+x+3]+glyph.bits[6*10+x+3]).reduce((a,b)=>a+b,0);
+      const leftStroke=(start,end)=>{
+        let count=0;
+        for(let y=start;y<=end;y++)for(let x=0;x<=2;x++)count+=glyph.bits[y*10+x];
+        return count;
+      };
+      const upperLeft=leftStroke(2,4),lowerLeft=leftStroke(7,9);
+      // 0 has an open center. The other rounded digits carry a center
+      // stroke, and 6/8 retain more of the lower-left edge than 5/9.
+      if(middle>=5 && Math.max(scores[3],scores[5],scores[6],scores[8],scores[9])>=scores[0]-.10)scores[0]-=.10;
+      if(middle<=1 && scores[0]>=Math.max(...scores)-.045)scores[0]+=.065;
+      if(middle>=4 && upperLeft>=5 && scores[9]>=scores[8]-.07 && lowerLeft<=2)scores[9]+=.05;
+      if(middle>=4 && lowerLeft>=6 && scores[6]>=scores[5]-.07)scores[6]+=.045;
+    }
     const order=scores.map((score,digit)=>({score,digit})).sort((a,b)=>b.score-a.score);
-    if(order[0].score<.83 || order[0].score-order[1].score<.055) return unknown;
+    const relaxedMinute=options.minuteLabel && options.outlinedLight;
+    if(order[0].score<(relaxedMinute ? .79 : .83) || order[0].score-order[1].score<(relaxedMinute ? .032 : .055)) return unknown;
     text+=order[0].digit; confidence=Math.min(confidence,order[0].score);
   }
   if (text.includes(':')) {
