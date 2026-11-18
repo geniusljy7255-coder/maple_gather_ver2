@@ -3,10 +3,11 @@ import craft from './tabs/craft.js';
 import scheduler from './tabs/scheduler.js';
 import hunting from './tabs/hunting/index.js';
 import { mountCharacterCompanion } from './character-companion.js';
+import { companionSay } from './core/notify.js';
 
 // 새 탭은 파일을 만든 뒤 여기에 한 줄만 추가하면 됩니다.
 // 탭 정의: { id, title, className?, html, mount?(section), onShow?(), onHide?() }
-const TABS = [craft, scheduler, hunting];
+const TABS = [craft, hunting, scheduler];
 
 const themeToggle = document.getElementById('themeToggle');
 const root = document.documentElement;
@@ -16,6 +17,7 @@ themeToggle.addEventListener('click', () => {
   root.dataset.theme = dark ? 'dark' : 'light';
   themeToggle.setAttribute('aria-checked', String(dark));
   try { localStorage.setItem('site-theme', root.dataset.theme); } catch {}
+  companionSay(dark ? '밤이야!' : '아침이야!');
 });
 
 mountCharacterCompanion(document.getElementById('ideaButton'));
@@ -61,7 +63,11 @@ TABS.forEach(tab => {
   btn.id = `tabBtn-${tab.id}`;
   btn.setAttribute('role', 'tab');
   btn.textContent = tab.title;
-  btn.addEventListener('click', () => switchTab(tab.id));
+  btn.addEventListener('click', () => {
+    switchTab(tab.id);
+    if (tab.id === 'hunting') companionSay('사냥하는 거야?');
+    if (tab.id === 'scheduler') companionSay('내가 뭘 안 했더라?');
+  });
   nav.appendChild(btn);
 
   const section = document.createElement('section');

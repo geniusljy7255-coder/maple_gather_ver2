@@ -1,6 +1,6 @@
 /* 화면 공유(getDisplayMedia) 시작/중지와 프레임 수신 */
 import { stats } from './diag.js';
-import { notify } from '../../core/notify.js';
+import { companionSay, notify } from '../../core/notify.js';
 import {experienceBuffHud} from './experience-buffs.js';
 
 let stream = null, track = null, video = null, reader = null;
@@ -47,6 +47,7 @@ export async function startCapture() {
   pumpVideoFrames(v);
   pumpProcessor(t);
   emit();
+  companionSay('내가 지켜볼게');
 }
 
 function pumpVideoFrames(v) {

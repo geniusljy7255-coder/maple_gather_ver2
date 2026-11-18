@@ -206,7 +206,7 @@ const huntButtonIds = ['huntStart','huntToggle','huntRestart','huntStop'];
 const huntActions = [
   () => S.startHunt(),
   () => S.state.hunt.pausedAt !== null ? S.resumeHunt() : S.pauseHunt(),
-  () => S.startHunt(),
+  () => S.startHunt(Date.now(),true),
   () => S.endHunt()
 ].map(action => () => { unlockAudio(); action(); render(Date.now()); });
 

@@ -3,6 +3,7 @@ import { $, setText, esc } from '../core/dom.js';
 import { readJSON } from '../core/storage.js';
 import { formatKoreanMoney } from '../core/format.js';
 import { nexonApi } from '../core/nexon.js';
+import { companionSay } from '../core/notify.js';
 import {
   DIFF_KOR, DAILY_DIFF_KEYS, WEEKLY_DIFF_KEYS, MONTHLY_DIFF_KEYS,
   EXCLUDED_WEEKLY, getBossPrice
@@ -127,6 +128,7 @@ async function fetchCharacterInfo() {
   selectedIdx = found.length ? Math.max(keep, 0) : -1;
   if (errors.length) showError(errors.join(' / '));
   renderScheduler();
+  if (found.length) companionSay('앗! 기억났다!');
 }
 
 function selectChar(i) { selectedIdx = i; renderScheduler(); }

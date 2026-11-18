@@ -1,25 +1,47 @@
 import {fetchCharacterAppearance} from './core/nexon.js';
 import {getSchedulerCharacters} from './tabs/scheduler.js';
-import {onVoiceStart} from './core/notify.js';
+import {onCompanionSpeech,onVoiceStart} from './core/notify.js';
 
 const settingsKey='ddangkaera-character-companion';
 const mapKey='ddangkaera-companion-map';
+const chairKey='ddangkaera-companion-chair';
+const defaultChair='03010001';
+const chairAssets=new URL('../img/item/chair/03010/',import.meta.url);
+const chairScale=72/41;
 const apiKeyName='nexon_api_key';
 const refreshMs=24*60*60*1000;
 const frameMs=130;
 const platforms={
   crane:{width:1241,height:698,maxWidth:745,left:380,right:930,y:437},
   mapleHill:{width:1818,height:1022,maxWidth:1000,left:175,right:1190,y:925},
-  temple:{width:1480,height:870,maxWidth:1050,left:150,right:1325,y:699,centered:true}
+  temple:{width:1952,height:544,left:110,right:1842,y:371,centered:true}
 };
 const idleLines=[
-  '여기서 잠깐 쉬어갈까?',
-  '오늘도 한 걸음씩!',
-  '잔디가 푹신해서 걷기 좋네.',
-  '이쪽 길도 한번 가볼까?',
-  '조금 쉬었다 다시 출발하자!',
-  '같이 산책하니까 좋다.'
+  '같이 산책하니까 좋다.',
+  '너무 무리하지마!',
+  '내가 있으닌까 좋지?'
 ];
+const alarmLines={
+  '회수하세요':'아이템 줍는 거 잊지 마!',
+  '룬이 나타났습니다':'룬을 까면 경험치를 더 얻을 수 있어!',
+  '화면 공유가 끊겼어요':'화면이 안보여!',
+  '알림 테스트입니다':'내 목소리 들려?'
+};
+const standingFrames=[0,7,8,7];
+
+function chairLayers(layers,scale){
+  return layers.map(([file,x,y,width,height,depth])=>{
+    const layer=document.createElement('span');
+    layer.className='companion-chair-layer';
+    layer.style.left=x*scale+'px';
+    layer.style.top=y*scale+'px';
+    layer.style.width=width*scale+'px';
+    layer.style.height=height*scale+'px';
+    layer.style.zIndex=depth>0 ? '2' : '0';
+    layer.style.backgroundImage=`url("${new URL(file,chairAssets).href}")`;
+    return layer;
+  });
+}
 
 async function loadFrame(source,action){
   const url=new URL(source);
@@ -35,7 +57,7 @@ async function loadFrame(source,action){
   image.hidden=true;
   return image;
 }
-const preloadFrames=source=>Promise.all(['A00.0','A02.0','A02.1','A02.2','A02.3','A07.0','A04.0']
+const preloadFrames=source=>Promise.all(['A00.0','A02.0','A02.1','A02.2','A02.3','A07.0','A04.0','A00.1','A00.2']
   .map(action=>loadFrame(source,action)));
 
 function makeBalloon(){
@@ -78,6 +100,8 @@ export function mountCharacterCompanion(trigger){
   ground.setAttribute('aria-hidden','true');
   const chair=document.createElement('span');
   chair.className='companion-chair';
+  const chairFront=document.createElement('span');
+  chairFront.className='companion-chair companion-chair-front';
   const hitbox=document.createElement('span');
   hitbox.className='companion-hitbox';
   const menu=document.createElement('div');
@@ -85,7 +109,7 @@ export function mountCharacterCompanion(trigger){
   menu.hidden=true;
   menu.setAttribute('aria-label','캐릭터 동작');
   const menuButtons=new Map();
-  for(const [pose,label] of [['sit','앉기'],['prone','엎드리기'],['walk','다시 걷기'],['keep','계속 두기']]) {
+  for(const [pose,label] of [['sit','앉기'],['prone','엎드리기'],['walk','일어서기'],['keep','계속 두기'],['send','보내기']]) {
     const button=document.createElement('button');
     button.type='button';
     button.dataset.pose=pose;
@@ -122,6 +146,16 @@ export function mountCharacterCompanion(trigger){
           <option value="temple">현혹의 신전</option>
         </select>
       </label>
+      <div class="companion-chair-setting">
+        <div class="companion-chair-preview" role="img" aria-label="의자 미리보기">
+          <div data-chair-preview></div>
+        </div>
+        <label>의자
+          <select name="chair">
+            <option value="03010001">기본 의자 · 03010001</option>
+          </select>
+        </label>
+      </div>
       <div class="companion-preview" data-preview hidden></div>
       <p class="companion-status" data-status role="status"></p>
       <div class="companion-buttons">
@@ -139,6 +173,55 @@ export function mountCharacterCompanion(trigger){
   const preview=find('[data-preview]'), status=find('[data-status]');
   const visitorNames=find('[name=visitors]');
   const mapSelect=find('[name=map]');
+  const chairSelect=find('[name=chair]'), chairPreview=find('[data-chair-preview]');
+  let selectedChair=defaultChair, chairs, chairRequest;
+  try {selectedChair=localStorage.getItem(chairKey) || defaultChair;} catch {}
+
+  function renderChair(){
+    const entry=chairs?.[selectedChair];
+    if (!entry) return;
+    const {layers,offset}=entry;
+    chair.classList.add('companion-chair-custom');
+    chair.replaceChildren(...chairLayers(layers.filter(layer=>layer[5]<=0),chairScale));
+    chairFront.replaceChildren(...chairLayers(layers.filter(layer=>layer[5]>0),chairScale));
+    sprite.style.setProperty('--companion-chair-x',offset[0]*chairScale+'px');
+    sprite.style.setProperty('--companion-chair-y',offset[1]*chairScale+'px');
+    const bottom=Math.max(...layers.map(layer=>layer[2]+layer[4]));
+    sprite.style.setProperty('--companion-chair-bottom',bottom*chairScale+'px');
+  }
+  function renderChairPreview(){
+    const layers=chairs?.[chairSelect.value]?.layers;
+    if (!layers) return;
+    const left=Math.min(...layers.map(layer=>layer[1]));
+    const top=Math.min(...layers.map(layer=>layer[2]));
+    const right=Math.max(...layers.map(layer=>layer[1]+layer[3]));
+    const bottom=Math.max(...layers.map(layer=>layer[2]+layer[4]));
+    const scale=Math.min(chairScale,82/(right-left),66/(bottom-top));
+    chairPreview.style.left=`calc(50% + ${-(left+right)*scale/2}px)`;
+    chairPreview.style.top=`calc(50% + ${-(top+bottom)*scale/2}px)`;
+    chairPreview.replaceChildren(...chairLayers(layers,scale));
+  }
+  function loadChairs(){
+    chairRequest ??= fetch(new URL('chairs.json',chairAssets)).then(response=>{
+      if (!response.ok) throw new Error('의자 목록을 불러오지 못했어.');
+      return response.json();
+    }).then(catalog=>{
+      chairs=catalog;
+      chairSelect.replaceChildren(...Object.entries(chairs).map(([id,entry])=>
+        new Option(entry.name || (id===defaultChair ? '기본 의자 · '+id : id),id)));
+      if (!Object.hasOwn(chairs,selectedChair)) selectedChair=defaultChair;
+      chairSelect.value=selectedChair;
+      renderChair();
+      renderChairPreview();
+    }).catch(()=>{
+      chairRequest=null;
+    });
+  }
+  chairSelect.addEventListener('change',()=>{
+    renderChairPreview();
+    if (!load.disabled) apply.disabled=false;
+  });
+  if (selectedChair!==defaultChair) loadChairs();
   let selectedMap='arcana';
   try {
     const savedMap=localStorage.getItem(mapKey);
@@ -159,10 +242,13 @@ export function mountCharacterCompanion(trigger){
   let timer=0,animation=0,request=0,hasRested=false;
   let visitTimer=0,visitRevision=0,visitPending=false,visitorKept=false;
   let guestFrames=null,visitorX=0,menuForVisitor=false,idleCount=0,lastIdle=-1;
+  let guestTimer=0,guestAnimation=0,standingTimer=0,standingIndex=0,greeted=false;
   const cachedVisitors=new Map();
   let pose='walk';
   const canWalk=()=>settings?.visible && frames.length && !document.hidden && !reducedMotion.matches &&
-    pose==='walk' && menu.hidden && (visitor.hidden || visitorKept);
+    pose==='walk' && menu.hidden;
+  const guestCanWalk=()=>!visitor.hidden && !document.hidden && !reducedMotion.matches &&
+    visitor.dataset.pose==='walk' && menu.hidden;
 
   function save(){
     try {localStorage.setItem(settingsKey,JSON.stringify(settings));} catch {}
@@ -178,6 +264,7 @@ export function mountCharacterCompanion(trigger){
   }
   function stopVisits(){
     clearTimeout(visitTimer);
+    stopGuestWalk();
     visitTimer=0;
     visitRevision++;
     visitPending=false;
@@ -203,11 +290,11 @@ export function mountCharacterCompanion(trigger){
       if (!guest) {
         const appearance=getSchedulerCharacters().find(character=>character.name===name && character.image) ??
           await fetchCharacterAppearance(name,localStorage.getItem(apiKeyName) || '');
-        const images=await Promise.all(['A00.0','A07.0','A04.0'].map(action=>loadFrame(appearance.image,action)));
+        const images=await preloadFrames(appearance.image);
         guest={name:appearance.name,images};
         cachedVisitors.set(name,guest);
       }
-      if (revision!==visitRevision) return;
+      if (revision!==visitRevision || document.hidden) return;
       const {left,right}=walkBounds();
       visitorX=right-offset>=145 ? offset+145 : Math.max(left,offset-145);
       visitor.style.setProperty('--companion-x',visitorX+'px');
@@ -218,8 +305,8 @@ export function mountCharacterCompanion(trigger){
       visitor.replaceChildren(visitorChair,...guestFrames,visitorBalloon.node,visitorHitbox);
       visitor.hidden=false;
       visitorBalloon.show('잠깐 놀러 왔어!');
-      stop();
-      visitTimer=setTimeout(sendVisitorAway,12000);
+      guestTimer=setTimeout(()=>walk(true),1800);
+      visitTimer=setTimeout(sendVisitorAway,30000);
     } catch {
       // An unavailable guest leaves the summoned character in place.
     } finally {
@@ -230,9 +317,17 @@ export function mountCharacterCompanion(trigger){
     }
   }
   function setVisitorPose(action){
-    const index=action==='sit' ? 1 : action==='prone' ? 2 : 0;
     visitor.dataset.pose=action;
+    showGuestFrame(action==='sit' ? 5 : action==='prone' ? 6 : 0);
+  }
+  function showGuestFrame(index){
     guestFrames?.forEach((frame,i)=>{frame.hidden=i!==index;});
+  }
+  function stopGuestWalk(){
+    clearTimeout(guestTimer);
+    cancelAnimationFrame(guestAnimation);
+    guestAnimation=0;
+    if (visitor.dataset.pose==='walk') showGuestFrame(0);
   }
   function sendVisitorAway(){
     stopVisits();
@@ -242,6 +337,7 @@ export function mountCharacterCompanion(trigger){
   function stop(){
     clearTimeout(timer);
     cancelAnimationFrame(animation);
+    animation=0;
     showFrame(pose==='sit' ? 5 : pose==='prone' ? 6 : 0);
   }
   function rest(duration){
@@ -267,49 +363,68 @@ export function mountCharacterCompanion(trigger){
     const width=document.documentElement.clientWidth;
     const platform=platforms[ground.dataset.map];
     if (platform) {
-      const scale=Math.min(width,platform.maxWidth)/platform.width;
+      const scale=Math.min(width,platform.maxWidth ?? width)/platform.width;
       const start=(width-scale*platform.width)/(platform.centered ? 2 : 1);
       return {left:start+platform.left*scale,right:start+platform.right*scale};
     }
     const margin=Math.min(80,width/3);
     return {left:margin,right:width-margin};
   }
-  function walk(){
-    if (!canWalk()) return;
-    const from=offset;
+  function walk(guest=false){
+    const allowed=guest ? guestCanWalk : canWalk;
+    if (!allowed()) return;
+    const from=guest ? visitorX : offset;
     const {left,right}=walkBounds();
     const minDistance=Math.min(96,(right-left)/3);
     const leftRange=Math.max(0,from-minDistance-left);
     const rightRange=Math.max(0,right-from-minDistance);
+    if (!leftRange && !rightRange) return;
     const choice=Math.random()*(leftRange+rightRange);
     const to=choice<leftRange ? left+choice : from+minDistance+choice-leftRange;
     if (from===to) return;
     const duration=Math.max(400,Math.abs(to-from)*9);
-    sprite.dataset.direction=to<from ? 'left' : 'right';
+    const character=guest ? visitor : sprite;
+    const displayFrame=guest ? showGuestFrame : showFrame;
+    character.dataset.direction=to<from ? 'left' : 'right';
     let start;
+    function nextFrame(){
+      const id=requestAnimationFrame(step);
+      if (guest) guestAnimation=id;
+      else animation=id;
+    }
     function step(now){
-      if (!canWalk()) return;
+      if (guest) guestAnimation=0;
+      else animation=0;
+      if (!allowed()) return;
       start ??= now;
       const elapsed=now-start;
-      offset=from+(to-from)*Math.min(1,elapsed/duration);
-      place();
+      const x=from+(to-from)*Math.min(1,elapsed/duration);
+      if (guest) visitorX=x;
+      else offset=x;
+      character.style.setProperty('--companion-x',x+'px');
       if (elapsed>=duration) {
-        rest(2500+Math.random()*3000);
+        const delay=2500+Math.random()*3000;
+        if (guest) {
+          showGuestFrame(0);
+          guestTimer=setTimeout(()=>walk(true),delay);
+        } else rest(delay);
       } else {
-        showFrame(1+Math.floor(elapsed/frameMs)%4);
-        animation=requestAnimationFrame(step);
+        displayFrame(1+Math.floor(elapsed/frameMs)%4);
+        nextFrame();
       }
     }
-    animation=requestAnimationFrame(step);
+    nextFrame();
   }
   function sync(){
     stop();
+    stopGuestWalk();
+    clearInterval(standingTimer);
     sprite.hidden=!settings?.visible || !frames.length;
     ground.hidden=sprite.hidden;
     document.body.classList.toggle('companion-visible',!sprite.hidden);
     document.body.dataset.companionMap=sprite.hidden ? '' : ground.dataset.map;
     if (sprite.hidden || document.hidden) {
-      if (sprite.hidden || !visitorKept) stopVisits();
+      if (sprite.hidden) stopVisits();
       balloon.hide();
       visitorBalloon.hide();
     } else {
@@ -324,6 +439,18 @@ export function mountCharacterCompanion(trigger){
       else timer=setTimeout(walk,850);
     } else if (!sprite.hidden && !document.hidden && menu.hidden) {
       scheduleStationarySpeech();
+    }
+    if (guestCanWalk()) guestTimer=setTimeout(()=>walk(true),850);
+    if (!sprite.hidden && !document.hidden && !reducedMotion.matches) {
+      standingTimer=setInterval(()=>{
+        const frame=standingFrames[++standingIndex%standingFrames.length];
+        if (pose==='walk' && !animation) showFrame(frame);
+        if (!visitor.hidden && visitor.dataset.pose==='walk' && !guestAnimation) showGuestFrame(frame);
+      },330);
+    }
+    if (!greeted && !sprite.hidden && !document.hidden) {
+      greeted=true;
+      balloon.show('안녕! 기다렸어!');
     }
   }
   function install(images){
@@ -340,12 +467,17 @@ export function mountCharacterCompanion(trigger){
     place();
     sprite.dataset.direction='left';
     balloon.name.textContent=settings.name+' :';
-    sprite.replaceChildren(chair,...images,balloon.node,hitbox);
+    sprite.replaceChildren(chair,...images,chairFront,balloon.node,hitbox);
     sync();
   }
-  onVoiceStart(({text})=>{
-    if (sprite.hidden || document.hidden) return;
-    balloon.show(text);
+  function speak(text){
+    if (!sprite.hidden && !document.hidden) balloon.show(text);
+  }
+  onCompanionSpeech(speak);
+  onVoiceStart(({text,channel})=>{
+    const line=alarmLines[text] ?? ((channel==='janus' || channel==='fountain' || channel.startsWith('job-'))
+      ? text.replace(/ 재설치$/,' 시간이 끝나버렸어') : text);
+    speak(line);
   });
 
   function closeMenu(){
@@ -359,31 +491,36 @@ export function mountCharacterCompanion(trigger){
       const {left,right,top,bottom}=box.getBoundingClientRect();
       return event.clientX>=left && event.clientX<=right && event.clientY>=top && event.clientY<=bottom;
     };
-    menuForVisitor=!visitor.hidden && contains(visitorHitbox) &&
-      (!contains(hitbox) || Math.abs(event.clientX-visitorX)<Math.abs(event.clientX-offset));
-    if (!menuForVisitor && !contains(hitbox)) return;
+    const hitsMain=contains(hitbox);
+    const hitsVisitor=!visitor.hidden && contains(visitorHitbox);
+    if (!hitsVisitor && !hitsMain) return;
+    menuForVisitor=hitsVisitor && (!hitsMain || Math.abs(event.clientX-visitorX)<Math.abs(event.clientX-offset));
     event.preventDefault();
     const keep=menuButtons.get('keep');
-    keep.hidden=!menuForVisitor;
-    keep.textContent=visitorKept ? '보내기' : '계속 두기';
-    menuButtons.get('walk').textContent=menuForVisitor ? '일어서기' : '다시 걷기';
+    keep.hidden=!menuForVisitor || visitorKept;
+    menuButtons.get('send').hidden=!menuForVisitor;
+    const currentPose=menuForVisitor ? visitor.dataset.pose : pose;
+    menuButtons.get('sit').hidden=currentPose==='sit';
+    menuButtons.get('prone').hidden=currentPose==='prone';
+    menuButtons.get('walk').hidden=currentPose==='walk';
     menu.hidden=false;
     stop();
+    stopGuestWalk();
     menu.style.left=Math.max(4,Math.min(event.clientX,innerWidth-menu.offsetWidth-4))+'px';
     menu.style.top=Math.max(4,Math.min(event.clientY,innerHeight-menu.offsetHeight-4))+'px';
-    menu.firstElementChild.focus({preventScroll:true});
+    menu.querySelector('button:not([hidden])').focus({preventScroll:true});
   });
   menu.addEventListener('click',event=>{
     const action=event.target.dataset.pose;
     if (!action) return;
     if (menuForVisitor && !visitor.hidden) {
+      if (action==='send') {sendVisitorAway();return;}
       if (action==='keep') {
-        if (visitorKept) {sendVisitorAway();return;}
         visitorKept=true;
         clearTimeout(visitTimer);
         visitTimer=0;
       } else setVisitorPose(action);
-    } else if (action!=='keep') pose=action;
+    } else if (action!=='keep' && action!=='send') pose=action;
     closeMenu();
   });
   document.addEventListener('pointerdown',event=>{if (!menu.contains(event.target)) closeMenu();});
@@ -416,6 +553,11 @@ export function mountCharacterCompanion(trigger){
     status.textContent='';
   }
   trigger.addEventListener('click',()=>{
+    loadChairs();
+    if (chairs) {
+      chairSelect.value=selectedChair;
+      renderChairPreview();
+    }
     closeMenu();
     clearPreview();
     listed=getSchedulerCharacters();
@@ -491,15 +633,28 @@ export function mountCharacterCompanion(trigger){
   });
   apply.addEventListener('click',async ()=>{
     const name=nickname.value.trim();
-    const existing=name===settings?.name && frames.length && apiKey.value.trim()===(localStorage.getItem(apiKeyName) || '')
-      ? {appearance:{name:settings.name,image:settings.image},images:frames,key:apiKey.value.trim()}
+    const keyInput=apiKey.value.trim();
+    const savedKey=localStorage.getItem(apiKeyName) || '';
+    const visitors=[...new Set(visitorNames.value.split(/[,，\n]/).map(value=>value.trim()).filter(Boolean))]
+      .filter(visitorName=>visitorName!==name).slice(0,10);
+    if (chairs?.[chairSelect.value] && chairSelect.value!==selectedChair) {
+      selectedChair=chairSelect.value;
+      try {localStorage.setItem(chairKey,selectedChair);} catch {}
+      renderChair();
+      if (!name || (name===settings?.name && keyInput===savedKey &&
+          JSON.stringify(visitors)===JSON.stringify(settings.visitors ?? []))) {
+        status.textContent='의자를 적용했어.';
+        return;
+      }
+    }
+    const existing=name===settings?.name && frames.length && keyInput===savedKey
+      ? {appearance:{name:settings.name,image:settings.image},images:frames,key:keyInput}
       : null;
     const selected=candidate ?? existing ?? await loadCharacter(false);
     if (!selected) return;
-    const visitors=[...new Set(visitorNames.value.split(/[,，\n]/).map(value=>value.trim()).filter(Boolean))];
     const {appearance,images,key}=selected;
     const sameCharacter=appearance.name===settings?.name;
-    settings={...appearance,visitors:visitors.filter(name=>name!==appearance.name).slice(0,10),
+    settings={...appearance,visitors,
       visible:sameCharacter && Boolean(settings.visible),updatedAt:Date.now()};
     save();
     try {if (key) localStorage.setItem(apiKeyName,key);} catch {}
@@ -515,12 +670,13 @@ export function mountCharacterCompanion(trigger){
     const platform=platforms[ground.dataset.map];
     ground.classList.toggle('companion-platform',Boolean(platform));
     if (platform) {
-      ground.style.setProperty('--platform-width',platform.maxWidth+'px');
+      const maxWidth=platform.maxWidth ? platform.maxWidth+'px' : '100%';
+      ground.style.setProperty('--platform-width',maxWidth);
       ground.style.setProperty('--platform-ratio',platform.width+' / '+platform.height);
-      document.body.style.setProperty('--companion-backdrop-width',platform.maxWidth+'px');
+      document.body.style.setProperty('--companion-backdrop-width',maxWidth);
       document.body.style.setProperty('--companion-backdrop-ratio',platform.width+' / '+platform.height);
     }
-    const lift=platform ? (platform.height-platform.y)*Math.min(width,platform.maxWidth)/platform.width-14 : 0;
+    const lift=platform ? (platform.height-platform.y)*Math.min(width,platform.maxWidth ?? width)/platform.width-14 : 0;
     document.body.style.setProperty('--companion-lift',lift+'px');
     for(const character of [sprite,visitor]) character.style.setProperty('--companion-lift',lift+'px');
     const {left,right}=walkBounds();

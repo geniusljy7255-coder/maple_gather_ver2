@@ -14,6 +14,7 @@ export function setAlarmEnabled(id,on){
 const PATTERNS = { info: [880], alert: [1175, 1175, 1175] };
 const subs = new Set();
 const voiceStartListeners = new Set();
+const companionListeners = new Set();
 let ctx = null;
 
 export const getVoice = () => localStorage.getItem(VOICE_KEY) !== '0';
@@ -28,6 +29,8 @@ export function setVoiceVolume(value) {
 }
 export const onNotify = fn => subs.add(fn);
 export const onVoiceStart = fn => voiceStartListeners.add(fn);
+export const onCompanionSpeech = fn => companionListeners.add(fn);
+export const companionSay = text => companionListeners.forEach(fn => fn(text));
 
 /** 브라우저는 사용자가 클릭한 뒤에만 소리를 허용하므로, 버튼 클릭 때 미리 호출해 둔다. */
 export function unlockAudio() {
