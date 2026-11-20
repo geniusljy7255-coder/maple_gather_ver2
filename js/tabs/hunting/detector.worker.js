@@ -7,6 +7,7 @@ import {createExperienceBuffDetector,scanExperienceBuffs} from './experience-buf
 import {readVipBooster} from './vip-booster.js';
 import {readStackCount} from './stack-count.js';
 import {isDeathBlossom} from './job-installers.js';
+import {readMinuteImage} from './number-image-reader.js';
 
 const SIZES = [32, 45, 44, 24, 28, 20, 26, 30, 22, 18, 16, 34, 36, 40, 48, 64];
 // Keep the common sizes first, then cover intermediate UI scales.
@@ -97,6 +98,10 @@ function findVipBooster(frame) {
     boosterTile = 0;
     lastBoosterTile = null;
   }
+  const hint={x:Math.floor(frame.w*.475),y:Math.floor(frame.h*.07),
+    w:Math.ceil(frame.w*.083),h:Math.ceil(frame.h*.115)};
+  const usual=readVipBooster(cropFrame(frame,hint.x,hint.y,hint.w,hint.h).frame);
+  if (usual!==null) return usual;
   const w = Math.min(frame.w,Math.max(180,Math.ceil(frame.w*.38)));
   const h = Math.min(frame.h,Math.max(100,Math.ceil(frame.h*.38)));
   for (const tile of new Set([lastBoosterTile,boosterTile++%16,boosterTile++%16])) {
@@ -126,16 +131,19 @@ self.onmessage = ({ data }) => {
       targets = data.targets.map(t => ({
         id: t.id, file: t.file, trackingMode:t.trackingMode, cursor: 0, lastScan: 0, locked: null, misses: 0,
         installerAttempts: 0, lastMatchedSize: null,
-        variants: [...new Set([t.main.w, ...(isInstaller(t) ? INSTALLER_SIZES : t.sizes || SIZES),
+        variants: [...new Set([t.main.w, ...(t.artwork?.map(image=>image.w) ?? []),
+          ...(isInstaller(t) ? INSTALLER_SIZES : t.sizes || SIZES),
           ...(t.id==='fragments_icon' || runeTypes.includes(t.id) ? Array.from({length:45},(_,i)=>i+20) : [])])].map(size => ({
           thr: !t.id.startsWith('job-') && isInstaller(t) && size >= 40 && size !== t.main.w ? t.thr-.045 : t.thr,
           minColor:t.id.startsWith('job-') ? .85 : undefined,
           strongShape:isDeathBlossom(t.file) ? {score:.92,minColor:.78} : undefined,
           readTimer:t.trackingMode==='count' ? false : undefined,
-          colorMode:t.colorMode, marker: !!t.marker, main: tpl(resizeIcon(t.fhd && size >= 15 ? t.fhd : t.main, size),
-            t.trackingMode==='count' ? 'stack-count' : isLara(t) || isDeathBlossom(t.file) ? 'wide-timer' : t.whole),
+          colorMode:t.colorMode, marker: !!t.marker,
+          templates:(t.artwork ?? [t.fhd && size>=15 ? t.fhd : t.main]).map(main=>
+            tpl(resizeIcon(main,size),t.trackingMode==='count' ? 'stack-count' :
+              isLara(t) || isDeathBlossom(t.file) ? 'wide-timer' : t.whole)),
           reject: t.reject ? tpl(resizeIcon(t.reject, size)) : null, last: null
-        }))
+        })).map(variant=>({...variant,main:variant.templates[0]}))
       }));
       dimensions = '';scanCursor=0;resetScreenMonitor(); experienceBox = null; boosterDimensions = '';
       return;
@@ -174,11 +182,13 @@ self.onmessage = ({ data }) => {
     }
     F.timerFormat=data.timerFormat;
     const selected = targets.filter(t => (!data.targetIds || data.targetIds.includes(t.id)) &&
-      (data.scanRune!==false || !t.id.startsWith('rune_')) &&
+      (data.scanRune!==false || t.id==='rune_marker' || !t.id.startsWith('rune_')) &&
       (data.scanFragments!==false || t.id!=='fragments_icon'));
     const searching = selected.filter(target => target.locked === null)
       .sort((a,b) => a.lastScan - b.lastScan);
-    const fullScanTargets = new Set(searching.slice(0,2));
+    const marker = searching.find(target=>target.id==='rune_marker');
+    const fullScanTargets = new Set(searching.filter(target=>target!==marker).slice(0,2));
+    if (marker) fullScanTargets.add(marker);
     const outsideShortcutBar = (x,y,size) => x+size*.5 < F.w*.57 || y+size*.5 < F.h*.86;
     const results = selected.map(target => {
       const variantAt = (variant, region) => ({
@@ -188,7 +198,15 @@ self.onmessage = ({ data }) => {
         const variant = target.variants[target.locked];
         const radius = target.misses ? variant.main.w : isInstaller(target) ? 8 : 3;
         const trackingVariant = isDeathBlossom(target.file) ? {...variant,thr:variant.thr-.04} : variant;
-        const hit = trackInCrop(F,trackingVariant,radius,variantAt);
+        let hit = trackInCrop(F,trackingVariant,radius,variantAt);
+        for (const main of variant.templates) {
+          if (main===variant.main) continue;
+          const other = trackInCrop(F,{...trackingVariant,main},radius,variantAt);
+          if (other.found && (!hit.found || other.score+other.color>hit.score+hit.color+.015)) {
+            hit = other;
+            variant.main = main;
+          }
+        }
         if (hit.found) {
           variant.last = {x:hit.x,y:hit.y};
           target.misses = 0;
@@ -207,7 +225,7 @@ self.onmessage = ({ data }) => {
       target.lastScan = ++scanCursor;
       let result = {found:false,score:0,mode:'scan'};
       const blossom = isDeathBlossom(target.file);
-      const sizeChecks = target.id === 'fragments_icon' ? 3 : 1;
+      const sizeChecks = ['fragments_icon','rune_marker'].includes(target.id) ? 3 : 1;
       for (let attempt=0; attempt<sizeChecks; attempt++) {
         let index;
         if (isInstaller(target)) {
@@ -220,11 +238,13 @@ self.onmessage = ({ data }) => {
             index = target.cursor++ % target.variants.length;
             if (index === preferred) index = target.cursor++ % target.variants.length;
           }
+        } else if (target.id==='rune_cooldown' && target.installerAttempts++%2===0) {
+          index=0;
         } else {
           index = target.cursor++ % target.variants.length;
         }
         const variant = target.variants[index];
-        const hit = detect(F,{
+        const options = {
           ...variantAt(variant),
           scanOptions: (blossom || target.id === 'fountain') && (index === 0 || variant.main.w === installerSize)
             ? {coarseMin:.20,maxCands:96} : {coarseMin:.40,maxCands:24},
@@ -234,12 +254,23 @@ self.onmessage = ({ data }) => {
             Object.assign(candidate,reading);
             return true;
           } : undefined
-        });
+        };
+        let hit;
+        let matchedTemplate;
+        for (const main of variant.templates) {
+          const candidate=detect(F,{...options,main});
+          if (!hit || (candidate.found && !hit.found) ||
+              (candidate.found===hit.found && candidate.score+(candidate.color ?? 0)>hit.score+(hit.color ?? 0))) {
+            hit=candidate;
+            matchedTemplate=main;
+          }
+        }
         if (!hit.found) {
           if (hit.score > result.score) result = hit;
           continue;
         }
         variant.last = {x:hit.x,y:hit.y};
+        variant.main = matchedTemplate;
         target.locked = index;
         target.misses = 0;
         if (isInstaller(target)) {
@@ -440,7 +471,8 @@ self.onmessage = ({ data }) => {
         if (!variant) continue;
         const hit = detect(F,{...variant,colorMode:null,last:{x:buff.x,y:buff.y},thr:.90},
           {allowScan:false,trackRadius:2});
-        if (!hit.found || hit.score < buff.score+.025 || hit.color < .91) continue;
+        if (!hit.found || hit.score < buff.score-.015 || hit.color < .945 ||
+            hit.score+hit.color < buff.score+buff.color+.02) continue;
         if (!gray.found || hit.score>gray.score) Object.assign(gray,hit,{chroma:{grayTemplate:true}});
         Object.assign(buff,{found:false,identity:false,seconds:null});
       }
@@ -464,6 +496,11 @@ self.onmessage = ({ data }) => {
         continue;
       }
       // The minute label is white and confined to the lower-left slot.
+      const {minutes}=readMinuteImage(r.preview,r.size);
+      if (minutes>=10 && minutes<=15) {
+        Object.assign(r,{seconds:minutes,confidence:.9,unit:'minutes',digit:'visible'});
+        continue;
+      }
       const minuteArea=[.02,.65,.58,1];
       const minuteOptions={min:10,area:minuteArea,light:true,aligned:true};
       const nativeMinute=readDigits(r.preview,r.size,minuteOptions);
@@ -484,13 +521,21 @@ self.onmessage = ({ data }) => {
       Object.assign(r,applyTimerFormat({...fallback,unit:'seconds'},F.timerFormat));
     }
     const monitor=installerOnly ? null : analyzeScreen(F,results,data.t,publishExperienceEarly ? null : firstExperience);
+    for (const result of results) delete result.preview;
+    let finalResults=results;
     if (monitor) {
+      const vipBooster=findVipBooster(F);
+      if (data.earlyMonitor) {
+        const runeResults=results.filter(result=>result.id.startsWith('rune_'));
+        postMessage({type:'monitor-ready',generation,t:data.t,results:runeResults,monitor:{vipBooster}});
+        finalResults=results.filter(result=>!result.id.startsWith('rune_'));
+      } else {
+        monitor.vipBooster=vipBooster;
+      }
       monitor.expBuffs=readExperienceBuffs(F,data.t,dims);
-      monitor.vipBooster=findVipBooster(F);
     }
     if (monitor?.exp?.value && monitor.exp.box) experienceBox = monitor.exp.box;
-    for (const result of results) delete result.preview;
-    postMessage({ type: 'result', generation, t: data.t, ms: performance.now() - t0, results, monitor });
+    postMessage({ type: 'result', generation, t: data.t, ms: performance.now() - t0, results:finalResults, monitor });
   } catch (e) {
     postMessage({ type: 'error', generation, message: String(e?.message || e) });
   }

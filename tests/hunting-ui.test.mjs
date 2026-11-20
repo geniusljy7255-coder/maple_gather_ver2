@@ -9,7 +9,7 @@ test('per-alarm mute suppresses sound and speech without suppressing event logs'
  N.notify('룬','alert','rune');assert.equal(beeps,3);assert.equal(voices,1);
  N.setAlarmEnabled('collect',true);N.notify('회수','alert','collect');assert.equal(beeps,6);assert.equal(voices,2);
 });
-const elements=new Map(),make=()=>({setAttribute(){},removeAttribute(){},style:{setProperty(key,value){this[key]=value;}},classList:{toggle(){}},handlers:{},children:[],selectors:new Map(),addEventListener(k,fn){this.handlers[k]=fn;},append(...n){this.children.push(...n);},replaceChildren(){this.children=[];},querySelector(key){if(!this.selectors.has(key))this.selectors.set(key,make());return this.selectors.get(key);},remove(){},getContext:()=>({clearRect(){},putImageData(){}})});
+const elements=new Map(),make=()=>({attributes:new Map(),getAttribute(name){return this.attributes.get(name)??null;},setAttribute(name,value){this.attributes.set(name,String(value));},removeAttribute(name){this.attributes.delete(name);},style:{setProperty(key,value){this[key]=value;}},classList:{toggle(){}},handlers:{},children:[],selectors:new Map(),addEventListener(k,fn){this.handlers[k]=fn;},append(...n){this.children.push(...n);},replaceChildren(){this.children=[];},querySelector(key){if(!this.selectors.has(key))this.selectors.set(key,make());return this.selectors.get(key);},remove(){},getContext:()=>({clearRect(){},putImageData(){}})});
 globalThis.document={hidden:false,createElement:make,getElementById:id=>elements.get(id)||null};
 const ui=await import('../js/tabs/hunting/ui.js');const S=await import('../js/tabs/hunting/session.js');
 test('confirmed booster expiry speaks once even without a recent screen reading',()=>{
@@ -52,6 +52,12 @@ test('raw-only observations start collection alerts and save percent-null histor
  assert.equal(S.collectLeftMs(203000),100000);
  S.stopHunt(204000);
  assert.equal(JSON.parse(saved.get('hunt_history_v1'))[0].startExp.percent,null);ui.render(204000);
+ const history=elements.get('huntHistory');
+ const rows=history.children;
+ assert.equal(rows.length,1);
+ assert.equal(rows[0].children[3].textContent,'0개');
+ ui.render(204250);
+ assert.equal(history.children,rows);
 });
 
 test('unconfirmed fragment reads never appear by themselves',()=>{
@@ -194,6 +200,19 @@ test('two Captain installer alerts are added, muted and removed independently',a
  }
 });
 
+test('saved sixth-job installers keep their selected skill without the obsolete toggle',async()=>{
+ const key='hunt_job_installers',previous=saved.get(key),skill='렌_매화검_3초식_예인';
+ try {
+  saved.set(key,JSON.stringify([{id:'job-1',skill,sixth:true}]));
+  const {jobInstallers,jobIconFiles}=await import('../js/tabs/hunting/job-installers.js?legacy-sixth-test');
+  assert.deepEqual(jobInstallers,[{id:'job-1',skill}]);
+  assert.deepEqual(jobIconFiles(jobInstallers[0]),[skill,skill+'_6차']);
+ } finally {
+  if(previous===undefined) saved.delete(key);
+  else saved.set(key,previous);
+ }
+});
+
 test('Ren count installer has its own sound switch and removes it with the installer',async()=>{
  const J=await import('../js/tabs/hunting/job-installers.js');
  const controls=elements.get('jobAlarmControls');
@@ -202,7 +221,8 @@ test('Ren count installer has its own sound switch and removes it with the insta
  try{
   J.updateJobInstaller(item.id,{skill:'렌_매화검_3초식_예인',sixth:true});
   assert.equal(controls.children.length,before+1);
-  assert.equal(J.jobIconFile(item),'렌_매화검_3초식_예인_6차');
+  assert.deepEqual(J.jobIconFiles(item),['렌_매화검_3초식_예인','렌_매화검_3초식_예인_6차']);
+  assert.equal(Object.hasOwn(item,'sixth'),false);
   const alarm=J.jobAlarm(item);assert.equal(alarm.label,'예인');
   N.setAlarmEnabled(alarm.id,false);assert.equal(N.isAlarmEnabled(alarm.id),false);
   const previousVoices=voices;N.notify('예인 재설치','alert',alarm.id);

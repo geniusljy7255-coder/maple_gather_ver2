@@ -121,10 +121,13 @@ export const html = `
   <h2 class="panel-h"><span><span class="dot"></span>룬 · 설치기</span><div class="flex flex-wrap items-center justify-end gap-2">
     <label class="flex items-center gap-1.5 text-xs text-slate-600">
       <span>인게임 시간 표기</span>
-      <select id="huntTimerFormat" class="rounded-lg border border-slate-300 bg-white px-2 py-1.5 font-bold text-slate-800">
-        <option value="seconds">초</option>
-        <option value="clock">분:초</option>
-      </select>
+      <span class="relative">
+        <select id="huntTimerFormat" class="appearance-none rounded-lg border border-slate-300 bg-white py-1.5 pl-2 pr-7 font-bold text-slate-800">
+          <option value="seconds">초</option>
+          <option value="clock">분:초</option>
+        </select>
+        <span class="hunt-select-arrow" aria-hidden="true"></span>
+      </span>
     </label>
     <button id="huntAddInstaller" class="${BTN_GHOST}">설치기 추가하기</button>
   </div></h2>
@@ -182,12 +185,13 @@ function surfaceWarn(surface) {
 function renderShare() {
   const i = getInfo();
   const chip = $('huntShareChip');
-  chip.textContent = i.active ? '공유 중' : '공유 안 함';
+  setText('huntShareChip', i.active ? '공유 중' : '공유 안 함');
   ['!border-emerald-300', '!bg-emerald-50', '!text-emerald-700'].forEach(c => chip.classList.toggle(c, i.active));
 
   const btn = $('huntShareBtn');
-  btn.textContent = i.active ? '화면 공유 중지' : '화면 공유 시작';
-  btn.className = i.active ? BTN_DANGER : BTN_PRIMARY;
+  setText('huntShareBtn', i.active ? '화면 공유 중지' : '화면 공유 시작');
+  const buttonClass = i.active ? BTN_DANGER : BTN_PRIMARY;
+  if (btn.className !== buttonClass) btn.className = buttonClass;
 
   setText('huntShareInfo', '화면 공유 시작 버튼을 눌러 MapleStory 화면을 공유 해주세요.');
 
@@ -556,9 +560,15 @@ export function render(now) {
 
   const left = S.collectLeftMs(now), total = S.state.collect.sec * 1000;
   setText('collectLeft', !S.state.collect.enabled ? '꺼짐' : left === null ? '--:--' : formatMS(left));
-  $('collectReset').disabled = !S.state.collect.enabled;
-  $('collectSec').disabled = !S.state.collect.enabled;
-  $('collectBar').style.width = left === null ? '0%' : `${Math.min(100, (1 - left / total) * 100).toFixed(1)}%`;
+  for (const id of ['collectReset','collectSec']) {
+    const control = $(id);
+    const disabled = !S.state.collect.enabled;
+    if (control.disabled !== disabled) control.disabled = disabled;
+  }
+  const bar = $('collectBar');
+  const elapsedPercent = left === null ? 0 : Math.min(100, (1 - left / total) * 100);
+  const width = `${Number(elapsedPercent.toFixed(1))}%`;
+  if (bar.style.width !== width) bar.style.width = width;
 
   renderMeasurements(now);
 
@@ -567,7 +577,7 @@ export function render(now) {
   renderPip(now);
 }
 
-let historyKey='';
+let renderedHistory;
 const dateTime=new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:"h23"});
 const percent=value=>value==null?'미확인':Number(value).toFixed(4)+'%';
 function renderMeasurements(now){
@@ -586,9 +596,12 @@ function renderMeasurements(now){
   const currentPercent = h.lastExp?.percent ?? lastPercent;
   const progress = $('huntExpProgress');
   const percentKnown = Number.isFinite(currentPercent);
-  $('huntExpBar').style.width = percentKnown ? currentPercent + '%' : '0%';
-  if (percentKnown) progress.setAttribute('aria-valuenow', String(currentPercent));
-  else progress.removeAttribute('aria-valuenow');
+  const expBar = $('huntExpBar');
+  const width = percentKnown ? currentPercent + '%' : '0%';
+  if (expBar.style.width !== width) expBar.style.width = width;
+  const currentValue = progress.getAttribute('aria-valuenow');
+  if (percentKnown && currentValue !== String(currentPercent)) progress.setAttribute('aria-valuenow', String(currentPercent));
+  if (!percentKnown && currentValue !== null) progress.removeAttribute('aria-valuenow');
   setText('huntFragmentsDetail',
     h.latestFragments===null ? '조각 아이콘 탐색 중' :
     '시작 '+(h.fragmentStart === null ? '—' : h.fragmentStart+'개')+
@@ -613,9 +626,9 @@ function renderMeasurements(now){
   setText('runeState', sharing ? runeLabel : '화면 공유 대기');
   setText('runeRemaining',!sharing?'':rune.seconds!==null?formatBuffTime(rune.seconds*1000,rune.approx):(rune.detail||''));
   setText('huntHistoryWarn',h.storageError?'브라우저 저장에 실패했습니다. 현재 기록은 이 화면에서만 유지됩니다.':'최근 10개 저장');
-  const key=JSON.stringify(h.history);
-  if(key!==historyKey){
-    historyKey=key;const host=$('huntHistory');host.replaceChildren();
+  if(h.history!==renderedHistory){
+    renderedHistory=h.history;
+    const host=$('huntHistory');host.replaceChildren();
     if (!h.history.length) {
       const row = document.createElement('tr');
       const cell = document.createElement('td');

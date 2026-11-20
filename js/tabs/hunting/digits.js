@@ -84,7 +84,7 @@ export function applyTimerFormat(reading,format) {
 
 let runeCooldownTemplates,minuteLabelTemplates,buffSecondsTemplates;
 const imageTemplateCache=new Map();
-export function getImageNumberTemplates(kind='timer',height=0) {
+function getImageNumberTemplates(kind='timer',height=0) {
   const key=kind+':'+height;
   if(imageTemplateCache.has(key))return imageTemplateCache.get(key);
   const templates=[],exact=new Map();

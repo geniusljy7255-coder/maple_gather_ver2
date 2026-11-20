@@ -7,7 +7,7 @@ export function runeScanInterval(s,now){
   const sample=s.cooldownSamples.at(-1);
   const confirmingSeconds=s.cooldownApprox && sample?.n<=599 && now-sample.t<=6500;
   if (deadline-now<=8000 || confirmingSeconds || (s.buffDeadline>now && now-s.buffConfirmedAt<5000)) return 0;
-  return 30000;
+  return 4500;
 }
 export function cooldownSeconds(value,mode,unit){
   if(!Number.isInteger(value)||value<1||value>900)return null;

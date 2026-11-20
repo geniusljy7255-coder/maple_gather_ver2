@@ -60,24 +60,22 @@ export function bindJobInstallers() {
         card.className = 'card min-w-0 space-y-2 text-center';
         card.innerHTML = `<div class="flex items-center gap-2">
             <img width="24" height="24" alt="" class="hidden h-6 w-6 shrink-0 rounded" data-icon>
-            <select aria-label="직업 및 스킬" class="min-w-0 flex-1 rounded border border-slate-300 bg-white p-1 text-xs">
-              <option value="">직업 - 스킬 선택</option>
-              ${jobSkills.map(skill => `<option value="${skill.id}">${skill.label}</option>`).join('')}
-            </select>
-            <label class="flex shrink-0 items-center gap-1 text-xs"><input type="checkbox" class="cb">6차</label>
-          </div><div id="trk-${item.id}-state" class="text-lg font-black text-slate-400">스킬 선택</div>
-          <div class="flex justify-end"><button type="button" class="text-xs text-slate-500 hover:text-red-600" data-remove>삭제</button></div>`;
+            <div class="relative min-w-0 flex-1">
+              <select aria-label="직업 및 스킬" class="h-7 w-full appearance-none rounded border border-slate-300 bg-white py-1 pl-1 pr-7 text-xs">
+                <option value="">직업 - 스킬 선택</option>
+                ${jobSkills.map(skill => `<option value="${skill.id}">${skill.label}</option>`).join('')}
+              </select>
+              <span class="hunt-select-arrow" aria-hidden="true"></span>
+            </div>
+            <button type="button" aria-label="설치기 삭제" title="설치기 삭제" class="h-7 w-6 shrink-0 rounded border border-slate-300 bg-white text-base leading-none text-slate-500 transition hover:bg-slate-100 hover:text-red-600" data-remove>×</button>
+          </div><div id="trk-${item.id}-state" class="text-lg font-black text-slate-400">스킬 선택</div>`;
         card.querySelector('select').addEventListener('change', event => updateJobInstaller(item.id,{skill:event.target.value}));
-        card.querySelector('input').addEventListener('change', event => updateJobInstaller(item.id,{sixth:event.target.checked}));
         card.querySelector('[data-remove]').addEventListener('click', () => removeJobInstaller(item.id));
         cards.set(item.id, card);
         grid.append(card);
       }
       const skill = jobSkill(item);
       card.querySelector('select').value = skill?.id || '';
-      const checkbox = card.querySelector('input');
-      checkbox.checked = !!item.sixth;
-      checkbox.disabled = !skill?.sixth || !skill.normal;
       const icon = card.querySelector('[data-icon]');
       const file = jobIconFile(item);
       icon.classList.toggle('hidden', !file);
@@ -96,7 +94,8 @@ export function renderInstallers(now = Date.now()) {
     if (!element) continue;
     const [label,color] = item.id.startsWith('job-') && !jobSkill(item)
       ? ['스킬 선택', 'text-slate-400'] : installerPresentation(item.id, now);
-    element.textContent = label;
-    element.className = `text-center text-lg font-black ${color}`;
+    if (element.textContent !== label) element.textContent = label;
+    const className = `text-center text-lg font-black ${color}`;
+    if (element.className !== className) element.className = className;
   }
 }

@@ -3,7 +3,6 @@ import { observeVipBooster } from './vip-booster.js';
 import { createHuntModel, beginHunt, finishHunt, observeExperience, observeFragments } from './hunt-model.js';
 import { createRuneState, updateRune } from './rune-state.js';
 const HISTORY_KEY='hunt_history_v1', LS_SEC='hunt_collect_sec', LS_ENABLED='hunt_collect_enabled';
-export const COLLECT_LIMITS={min:10,max:600,def:100};
 const sanitizeSec=v=>Math.min(600,Math.max(10,Math.round(Number(v))||100));
 let saved=[];
 try { const v=JSON.parse(localStorage.getItem(HISTORY_KEY)||'[]');

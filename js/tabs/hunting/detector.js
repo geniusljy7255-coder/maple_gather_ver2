@@ -14,7 +14,7 @@ export function setTimerFormat(value) {
   try { localStorage.setItem(TIMER_FORMAT_KEY,timerFormat); } catch {}
 }
 
-export const status = { error: '', frames: 0, ms: 0, lastAt: 0 };
+export const status = { error: '', lastAt: 0 };
 
 function createDetector(onResult, reportError) {
   let worker;
@@ -27,7 +27,7 @@ function createDetector(onResult, reportError) {
   const detector = {worker, busy:false, busySince:0};
   worker.onmessage = ({ data }) => {
     if (data.generation !== generation) return;
-    if (data.type === 'experience-ready') {
+    if (data.type === 'experience-ready' || data.type === 'monitor-ready') {
       onResult(data);
       return;
     }
@@ -38,8 +38,6 @@ function createDetector(onResult, reportError) {
     }
     if (reportError) {
       status.error = '';
-      status.frames++;
-      status.ms = data.ms;
       status.lastAt = Date.now();
     }
     onResult(data);
@@ -110,7 +108,7 @@ export function analyzeInstallers(img,t) {
   return sendFrame(installerDetector,img,t,{installerOnly:true});
 }
 export function analyzeMonitor(img,t,externalExperience,scanRune,scanFragments,scanExperience) {
-  return sendFrame(monitorDetector,img,t,{externalExperience,experienceBox,scanRune,scanFragments,scanExperience});
+  return sendFrame(monitorDetector,img,t,{externalExperience,experienceBox,scanRune,scanFragments,scanExperience,earlyMonitor:true});
 }
 function sendFrame(detector,img,t,fields) {
   const now=Date.now();

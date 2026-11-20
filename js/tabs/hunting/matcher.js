@@ -6,11 +6,11 @@ import { applyTimerFormat, readDigits } from './digits.js';
  * - 절반 해상도에서 후보를 먼저 거르고, 원본 해상도에서 정밀 확인한다.
  * - 남은 숫자는 digits.js에서 판독하고 tracking-state.js에서 시간 흐름을 검증한다. */
 
-export const ICON = 32;
+const ICON = 32;
 const TRACK_SLACK = 0.02;
 
 /* ---------- 기초 ---------- */
-export function toGray(rgba, w, h) {
+function toGray(rgba, w, h) {
   const g = new Float32Array(w * h);
   for (let i = 0, p = 0; i < g.length; i++, p += 4) g[i] = (rgba[p] + rgba[p + 1] + rgba[p + 2]) / 3;
   return g;
@@ -45,7 +45,7 @@ function integral(g, w, h) {
 
 /* ---------- 템플릿 ---------- */
 /** 가운데 절반(숫자 자리)을 뺀 링 모양 마스크 템플릿 */
-export function makeTemplateGray(g, w, h, valid = null, whole = false) {
+function makeTemplateGray(g, w, h, valid = null, whole = false) {
   const stack=whole==='stack-count',full=whole===true,cooldown=whole==='cooldown',wideTimer=whole==='wide-timer',minuteTimer=whole==='minute-timer';
   const x0=stack?Math.floor(w*.38):full||cooldown||wideTimer||minuteTimer?0:Math.floor(w/8),
     x1=stack?w:full?0:cooldown?Math.ceil(w*.75):w-x0,
@@ -123,7 +123,7 @@ function exOffsets(t, W) {
 
 /* ---------- 비교 ---------- */
 /** (x,y)에 놓인 템플릿과 이미지의 ZNCC (-1 ~ 1) */
-export function zncc(G, W, H, t, x, y) {
+function zncc(G, W, H, t, x, y) {
   if (x < 0 || y < 0 || x + t.w > W || y + t.h > H) return -1;
   const off = offsets(t, W), base = y * W + x;
   let sv = 0, svv = 0, dot = 0;
@@ -180,7 +180,7 @@ function half2(F) {
 }
 
 /** 직전 위치 근처만 확인 (빠름). 가장 높은 점수와 위치 */
-export function trackNear(F, t, px, py, r = 3) {
+function trackNear(F, t, px, py, r = 3) {
   let best = { s: -1, x: px, y: py };
   for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
     const s = zncc(F.G, F.w, F.h, t.full, px + dx, py + dy);
@@ -190,7 +190,7 @@ export function trackNear(F, t, px, py, r = 3) {
 }
 
 /** 화면 전체 탐색. 정밀 확인까지 끝낸 후보를 점수순으로 반환 */
-export function scanAll(F, t, { coarseMin = 0.5, maxCands = 6 } = {}) {
+function scanAll(F, t, { coarseMin = 0.5, maxCands = 6 } = {}) {
   const H2 = half2(F);
   const out = [];
   for (const c of coarse(H2, t.half, coarseMin, maxCands)) {
@@ -205,7 +205,7 @@ export function scanAll(F, t, { coarseMin = 0.5, maxCands = 6 } = {}) {
 }
 
 /** 아이콘 안쪽(숫자 자리)의 노란 픽셀 수 */
-export function countYellow(F, x, y, size = ICON) {
+function countYellow(F, x, y, size = ICON) {
   const x0 = x + (size >> 3), x1 = x + size - (size >> 3), y0 = y + (size * 6 >> 5), y1 = y + size - (size * 6 >> 5);
   let n = 0;
   for (let yy = Math.max(0, y0); yy < Math.min(F.h, y1); yy++) {
@@ -218,7 +218,7 @@ export function countYellow(F, x, y, size = ICON) {
 }
 
 /** 작은 룬 표식은 반해상도 후보 검색에서 모양이 소실되므로 원본 색상 군집에서 찾는다. */
-export function scanMarker(F,t) {
+function scanMarker(F,t) {
   if(!F._markerCenters){
     const seen=new Uint8Array(F.w*F.h),mask=new Uint8Array(F.w*F.h),centers=[];
     for(let i=0;i<mask.length;i++){
@@ -289,7 +289,7 @@ export function detect(F, target, { allowScan = true, trackRadius = 3 } = {}) {
   return fallback ?? { found: false, score: Math.max(0, best.s), x: best.x, y: best.y, yellow: 0, mode, rejected };
 }
 
-export function iconChroma(F,t,x,y){
+function iconChroma(F,t,x,y){
   let sum=0,colored=0,blue=0,count=0;
   for(let i=0;i<t.full.n;i++){
     const dx=t.full.dx[i],dy=t.full.dy[i];
@@ -370,24 +370,4 @@ function done(F, c, mode, rejected, main, readTimer=true) {
   reading=applyTimerFormat(reading ?? readDigits(preview,size),F.timerFormat);
   return { found: true, identity:true, chroma:c.chroma, score: c.s, color: c.color, x: c.x, y: c.y,
     size, yellow, ...reading, preview, mode, rejected };
-}
-
-/* ---------- 등록 화면용: 클릭한 곳을 포함하는 아이콘 테두리 찾기 ---------- */
-/** img: {data,width,height}. 검은 1px 테두리가 가장 뚜렷한 32x32 박스를 찾는다. */
-export function snapIconBox(img, cx, cy, size = ICON) {
-  const { data, width: W, height: H } = img;
-  const dark = (x, y) => { const p = (y * W + x) * 4; return data[p] + data[p + 1] + data[p + 2] < 90; };
-  let best = { x: Math.round(cx - size / 2), y: Math.round(cy - size / 2), dark: -1 };
-  for (let y = cy - size + 1; y <= cy; y++) {
-    for (let x = cx - size + 1; x <= cx; x++) {
-      if (x < 0 || y < 0 || x + size > W || y + size > H) continue;
-      let d = 0;
-      for (let i = 2; i < size - 2; i++) {            // 둥근 모서리는 제외
-        d += dark(x + i, y) + dark(x + i, y + size - 1) + dark(x, y + i) + dark(x + size - 1, y + i);
-      }
-      if (d > best.dark) best = { x, y, dark: d };
-    }
-  }
-  best.ratio = best.dark / (4 * (size - 4));           // 1이면 테두리가 완벽히 검은색
-  return best;
 }

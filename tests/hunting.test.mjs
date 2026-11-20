@@ -240,14 +240,42 @@ test('rune worker finds a marker at a moved location on a different background',
    {id:'rune_marker',main:icon,thr:.85,whole:true,marker:true},
    {id:'rune_cooldown',main:icon,thr:.88,colorMode:'gray'}
   ]}});
-  self.onmessage({data:{type:'frame',generation:1,t:1000,w:320,h:240,buffer:pixels.buffer,externalExperience:true}});
+  self.onmessage({data:{type:'frame',generation:1,t:1000,w:320,h:240,buffer:pixels.buffer,externalExperience:true,scanRune:false,earlyMonitor:true}});
   const message=messages.at(-1);
   assert.equal(message.type,'result',message.message);
-  const marker=message.results.find(hit=>hit.id==='rune_marker');
+  assert.equal(message.results.some(hit=>hit.id==='rune_marker'),false);
+  const early=messages.find(result=>result.type==='monitor-ready');
+  const marker=early.results.find(hit=>hit.id==='rune_marker');
   assert.equal(marker.found,true);
   assert.deepEqual([marker.x,marker.y],[203,81]);
+  assert.equal(early.results.some(hit=>hit.id==='rune_cooldown'),false);
  } finally {
   globalThis.self=previousSelf;globalThis.postMessage=previousPost;
+ }
+});
+test('worker publishes the booster clock on the first monitoring frame',async()=>{
+ const previousSelf=globalThis.self,previousPost=globalThis.postMessage,messages=[];
+ globalThis.self={};
+ globalThis.postMessage=message=>messages.push(message);
+ try {
+  await import('../js/tabs/hunting/detector.worker.js?booster-monitor-test');
+  self.onmessage({data:{type:'config',generation:1,targets:[]}});
+  const w=800,h=500,rgba=new Uint8ClampedArray(w*h*4),left=382,top=43;
+  const paint=(x,y,width,height)=>{
+   for(let row=y;row<y+height;row++)for(let col=x;col<x+width;col++)rgba.set([245,225,80,255],(row*w+col)*4);
+  };
+  for(const start of [0,15,34,49]){
+   for(const y of [0,11,22])paint(left+start+2,top+y,8,3);
+   for(const x of [0,9])for(const y of [4,15])paint(left+start+x,top+y,3,8);
+  }
+  paint(left+29,top+22,3,3);
+  self.onmessage({data:{type:'frame',generation:1,t:1000,w,h,buffer:rgba.buffer,externalExperience:true,earlyMonitor:true}});
+  assert.equal(messages[0].type,'monitor-ready');
+  assert.equal(messages[0].monitor.vipBooster,88880);
+  assert.equal(messages[1].type,'result',messages[1].message);
+ }finally{
+  globalThis.self=previousSelf;
+  globalThis.postMessage=previousPost;
  }
 });
 test('raw experience increasing starts hunting even while rounded percentage is unchanged',()=>{
@@ -477,9 +505,9 @@ test('confirmed rune cooldown stays in PiP despite later colored buff candidates
  assert.equal(s.cooldownDeadline,deadline);
  assert.equal(runePresentation(s,21500).seconds,203);
  assert.equal(runePresentation(s,21500).approx,false);
- assert.equal(runeScanInterval(s,21500),30000);
+ assert.equal(runeScanInterval(s,21500),4500);
  s.cooldownApprox=true;
- assert.equal(runeScanInterval(s,21500),30000);
+ assert.equal(runeScanInterval(s,21500),4500);
  s.cooldownSamples.push({n:203,t:21500});
  assert.equal(runeScanInterval(s,21500),0);
  s.cooldownApprox=false;

@@ -1,7 +1,8 @@
 import {detect,makeTemplate,resizeIcon} from './matcher.js';
 import {applyTimerFormat,readDigits} from './digits.js';
 import {readScreenText} from './screen-text.js';
-import {observeExperienceBuff,experienceBuffPending} from './experience-buffs.js';
+import {readMinuteImage} from './number-image-reader.js';
+import {observeExperienceBuff,experienceBuffPending,usesUnframedArtwork} from './experience-buffs.js';
 
 const sizes=[...new Set([32,45,44,31,33,27,28,30,34,36,40,48,24,56,64,
   ...Array.from({length:49},(_,i)=>i+16)])];
@@ -9,22 +10,39 @@ const similarGroups={multiplier:'bonus',bonus:'multiplier',
   'experience-potion':'wealth-potion','wealth-potion':'experience-potion'};
 const sameSlot=(a,b)=>Math.abs(a.x-b.x)<a.size*.40 && Math.abs(a.y-b.y)<a.size*.40;
 const matchScore=({hit})=>hit.score+hit.color;
-const modes=['wide-timer','minute-timer','coupon-top','vip-edges'];
+const modes=['wide-timer','minute-timer','coupon-top','vip-edges','buff-edges','potion-art'];
 const expIdentityGroup=group=>group==='multiplier' || group==='bonus' || group==='vip';
+function fitArtworkToSlot(main) {
+  const size=Math.max(32,main.w,main.h);
+  if (main.w===size && main.h===size) return main;
+  const rgba=new Uint8ClampedArray(size*size*4);
+  const left=Math.floor((size-main.w)/2),top=Math.floor((size-main.h)/2);
+  for(let y=0;y<main.h;y++){
+    const from=y*main.w*4;
+    rgba.set(main.rgba.subarray(from,from+main.w*4),((top+y)*size+left)*4);
+  }
+  return resizeIcon({rgba,w:size,h:size},32);
+}
 function templateFor(asset,size,mode='wide-timer'){
   const key=mode+'-'+size;
   if (!asset.templates.has(key)) {
     const image=resizeIcon(asset.main,size);
-    if(mode==='bonus-badge' || mode==='coupon-top' || mode==='vip-mark' || mode==='vip-edges' || mode==='hud-header'){
+    if(mode==='bonus-badge' || mode==='coupon-top' || mode==='vip-mark' || mode==='vip-edges' || mode==='hud-header' || mode==='buff-edges' || mode==='gold-art' || mode==='potion-art'){
       const pixels=image.rgba.slice();
       for(let y=0;y<size;y++)for(let x=0;x<size;x++){
-        const outside=mode==='hud-header' ? y>=size*.35 :
+        const p=(y*size+x)*4;
+        const outside=mode==='gold-art' ?
+          (y>=size*.63 && x<size*.55) || pixels[p]<pixels[p+2]+48 || pixels[p+1]<pixels[p+2]+18 :
+          mode==='potion-art' ? (y>=size*.63 && x<size*.55) || (y>=size*.26 && y<size*.62 && x<size*.75) ||
+            Math.max(pixels[p],pixels[p+1],pixels[p+2])-Math.min(pixels[p],pixels[p+1],pixels[p+2])<34 :
+          mode==='buff-edges' ? y>=size*.25 && (y<size*.74 || x<size*.65) :
+          mode==='hud-header' ? y>=size*.35 :
           mode==='vip-edges'
           ? y>=size*.34 && (y<size*.65 || x<size*.45 || y>=size*.94)
           : mode==='vip-mark'
           ? y<size*.25 || y>=size*.68 || x<size*.12 || x>=size*.89
           : y>=size*.46 || (mode==='bonus-badge' && (y<size*.05 || x<size*.52 || x>=size*.96));
-        if(outside)pixels[(y*size+x)*4+3]=0;
+        if(outside)pixels[p+3]=0;
       }
       asset.templates.set(key,makeTemplate(pixels,size,size,true));
     } else asset.templates.set(key,makeTemplate(image.rgba,size,size,mode));
@@ -33,12 +51,13 @@ function templateFor(asset,size,mode='wide-timer'){
 }
 export function createExperienceBuffDetector(assets){
   return {
-    assets:assets.map(asset=>({...asset,templates:new Map(),last:null,cursor:0})),
+    assets:assets.map(asset=>({...asset,main:usesUnframedArtwork(asset.group) ? fitArtworkToSlot(asset.main) : asset.main,
+      templates:new Map(),last:null,cursor:0})),
     records:{},checked:{},misses:{},format:null
   };
 }
 
-export function readExperienceBuffMinutes(hit,main){
+function readExperienceBuffMinutes(hit,main){
   const {preview,size}=hit;
   const minute={min:10,longTimer:true,aligned:true,minuteLabel:true,light:true,minGlyphHeight:.14};
   const votes=new Map();
@@ -143,8 +162,10 @@ function readTimer(hit,main,format,region){
   const acceptable=reading=>reading.seconds>0 && reading.seconds<=10800 && reading.confidence>=.85;
   for (const options of [{...center,clockOnly:true,background:main.rgba},{...center,clockOnly:true}]) {
     const reading=readDigits(preview,size,options);
-    if (acceptable(reading)) return {seconds:reading.seconds,approx:false};
+    if (acceptable(reading) && reading.seconds<600) return {seconds:reading.seconds,approx:false};
   }
+  const nativeMinutes=readMinuteImage(preview,size);
+  if (nativeMinutes.minutes!==null) return {seconds:nativeMinutes.minutes*60,approx:true};
   // White bottom-left labels and yellow center digits represent different units.
   // A centered three-digit result is more reliable than white icon artwork.
   const secondsReadings=[];
@@ -159,13 +180,13 @@ function readTimer(hit,main,format,region){
   const repeatedSeconds=secondsReadings.find(read=>read.raw>=100 &&
     secondsReadings.filter(other=>other.raw===read.raw).length>=2);
   if(repeatedSeconds)return {seconds:repeatedSeconds.seconds,approx:false};
-  const minutes=readExperienceBuffMinutes(hit,main);
+  const minutes=nativeMinutes.ambiguous ? null : readExperienceBuffMinutes(hit,main);
   if (minutes!==null) return {seconds:minutes*60,approx:true};
   if(secondsReadings.length) {
     const best=secondsReadings.sort((a,b)=>b.confidence-a.confidence)[0];
     return {seconds:best.seconds,approx:false};
   }
-  return readMinuteAtSlot(region,hit) ?? {seconds:null,approx:false};
+  return (nativeMinutes.ambiguous ? null : readMinuteAtSlot(region,hit)) ?? {seconds:null,approx:false};
 }
 
 function readMultiplier(hit){
@@ -193,9 +214,11 @@ function identityAt(region,asset,hit,refs){
     if(reference.group==='vip')return false;
     return score(match(reference,'hud-header',.78))>=score(vipHeader)-.045;
   });
-  const vipIdentity=[vipTop,vipEdges,headerWins ? vipHeader : null].sort((a,b)=>score(b)-score(a))[0];
-  const ownsVip=(vipTop?.found && vipTop.color>=.92 &&
+  const confirmedVip=(vipTop?.found && vipTop.color>=.92 &&
     (vipTop.score>=.84 || vipMark?.found)) || (vipEdges?.found && vipEdges.color>=.94) || headerWins;
+  const cleanEdges=vip && !confirmedVip && match(vip,'buff-edges',.90);
+  const vipIdentity=[vipTop,vipEdges,cleanEdges,headerWins ? vipHeader : null].sort((a,b)=>score(b)-score(a))[0];
+  const ownsVip=confirmedVip || (cleanEdges?.found && cleanEdges.color>=.94);
   if(asset.group==='vip' && !ownsVip)return false;
   if(asset.group!=='vip' && ownsVip &&
      (!own.found || score(vipIdentity)>=score(own)-.02))return false;
@@ -211,8 +234,9 @@ function identityAt(region,asset,hit,refs){
 
 function findAsset(region,asset,large,format,neighbors=[],coupons=[]) {
   const first=large?45:32;
+  const nativeFirst=usesUnframedArtwork(asset.group) && asset.main.w===35;
   const candidates=asset.last ? [asset.last.size,first] :
-    [first,asset.main.w,sizes[asset.cursor++%sizes.length]];
+    [...(nativeFirst ? [asset.main.w,32,first] : [first,asset.main.w]),sizes[asset.cursor++%sizes.length]];
   const acceptPosition=asset.group==='luck' || asset.group==='wealth'
     ? (x,y,size)=>matchesUnionColor(region,x,y,size,asset.group)
     : expIdentityGroup(asset.group) ? (x,y,size)=>identityAt(region,asset,{x,y,size},coupons) : undefined;
@@ -222,7 +246,18 @@ function findAsset(region,asset,large,format,neighbors=[],coupons=[]) {
     const hit=detect(region,{main:templateFor(asset,size,mode),minColor:.90,thr:.87,
       readTimer:false,acceptPosition,last:asset.last},{allowScan:false,trackRadius:2});
     if(hit.found){
-      const reading=readTimer(hit,main,format,region);
+      let reading=readTimer(hit,main,format,region);
+      if (!reading.seconds && nativeFirst && mode!=='buff-edges') {
+        const edges=detect(region,{main:templateFor(asset,size,'buff-edges'),minColor:.92,thr:.90,
+          readTimer:false,acceptPosition,last:hit},{allowScan:false,trackRadius:2});
+        if (edges.found && (edges.x!==hit.x || edges.y!==hit.y)) {
+          reading=readTimer(edges,main,format,region);
+          if (reading.seconds) {
+            asset.last={x:edges.x,y:edges.y,size,mode:'buff-edges'};
+            return {hit:edges,main,mode:'buff-edges',reading,file:asset.file,group:asset.group};
+          }
+        }
+      }
       if(reading.seconds || !expIdentityGroup(asset.group)){
         asset.last={x:hit.x,y:hit.y,size,mode};
         return {hit,main,mode,reading,file:asset.file,group:asset.group};
@@ -232,16 +267,36 @@ function findAsset(region,asset,large,format,neighbors=[],coupons=[]) {
   let best=null,bestTimed=null;
   for (const size of new Set(candidates)) {
     const main=templateFor(asset,size);
-    const target={main,minColor:.86,thr:.86,readTimer:false,acceptPosition,scanOptions:{coarseMin:.48,maxCands:12}};
+    const mode=asset.group==='gold' ? 'gold-art' : nativeFirst ? 'potion-art' : 'wide-timer';
+    const masked=mode!=='wide-timer';
+    const target={main:mode==='gold-art' ? templateFor(asset,size,mode) : main,minColor:mode==='gold-art' ? .91 : .86,
+      thr:.86,readTimer:false,acceptPosition,
+      scanOptions:masked ? {coarseMin:.42,maxCands:24} : {coarseMin:.48,maxCands:12}};
     const last=asset.last?.size===size ? asset.last : null;
     const hit=(last && detect(region,{...target,last},{allowScan:false,trackRadius:3})) || {};
-    const match=hit.found ? hit : detect(region,target);
+    let match=hit.found ? hit : detect(region,target);
+    let matchedMode=mode==='gold-art' ? mode : 'wide-timer';
+    if (!match.found && mode==='potion-art') {
+      match=detect(region,{...target,main:templateFor(asset,size,mode),minColor:.91});
+      matchedMode=mode;
+    }
     if (!match.found) continue;
-    const candidate={hit:match,main,mode:'wide-timer',reading:readTimer(match,main,format,region)};
+    const candidate={hit:match,main,mode:matchedMode,reading:readTimer(match,main,format,region)};
     if (!best || matchScore(candidate)>matchScore(best)) best=candidate;
     if(candidate.reading.seconds && (!bestTimed || matchScore(candidate)>matchScore(bestTimed)))bestTimed=candidate;
   }
   best=bestTimed ?? best;
+  const slot=best?.hit ?? asset.last;
+  if (!best?.reading?.seconds && slot) {
+    const {size}=slot;
+    const mode='buff-edges', main=templateFor(asset,size);
+    const hit=detect(region,{main:templateFor(asset,size,mode),minColor:.92,thr:.90,
+      readTimer:false,acceptPosition,last:slot},{allowScan:false,trackRadius:2});
+    if (hit.found) {
+      const reading=readTimer(hit,main,format,region);
+      if (reading.seconds) best={hit,main,mode,reading};
+    }
+  }
   // Match the upper artwork even when the normal match found a candidate
   // but couldn't read its timer. Keep a strong untimed match as pending.
   if (!best?.reading?.seconds) {
@@ -352,7 +407,7 @@ function identifyBuff(candidate,region,assets) {
     const other=detect(region,{main:templateFor(rival,hit.size,rivalMode),minColor:.84,thr:.84,
       readTimer:false,last:{x:hit.x,y:hit.y}},{allowScan:false,trackRadius:1});
     const margin=group==='bonus' || group==='multiplier'
-      ? (rival.group==='multiplier' && !visibleMultiplier ? .065 : .018) : -.06;
+      ? (rival.group==='multiplier' && !visibleMultiplier ? .065 : .018) : -.015;
     if (other.found && (!own.found || other.score+other.color>own.score+own.color+margin)) {
       return expIdentityGroup(group) ? null : {multiplier:null,seconds:null,approx:false};
     }
@@ -372,6 +427,10 @@ export function scanExperienceBuffs(detector,frame,now,{onlyPending=false,maxGro
   const isUnion=asset=>asset.group==='luck' || asset.group==='wealth';
   const besideUnion=asset=>asset.group==='vip' || asset.group==='gold';
   const unionSeen=assets.some(asset=>isUnion(asset) && asset.last);
+  const awaitingConfirmation=group=>{
+    const record=records[group];
+    return Boolean(record?.deadline<=now && record.sample && now-record.sample.at<=2500);
+  };
   const eligible=assets.filter(asset=>{
     const record=records[asset.group];
     const pending=experienceBuffPending(record,now);
@@ -382,12 +441,14 @@ export function scanExperienceBuffs(detector,frame,now,{onlyPending=false,maxGro
     const often=asset.group==='bonus' || asset.group==='multiplier' || (unionSeen && besideUnion(asset));
     const interval=active
       ? (record.deadline-now<=12000 ? 450 : record.approx || record.sample?.deadline!==record.deadline ? 5000 : 30000)
-      : pending ? (now-record.pendingSince>6500 ? 1500 : 450) :
+      : pending ? (now-record.pendingSince>6500 && !awaitingConfirmation(asset.group) ? 1500 : 450) :
         (often ? 2500 : 3000*2**Math.max(0,(misses[asset.group] ?? 0)-1));
     return now-(checked[asset.group] ?? -Infinity)>=interval;
   });
+  const priority=group=>now-(checked[group] ?? -Infinity)>=4000 ? 2 : Number(awaitingConfirmation(group));
   const dueGroups=[...new Set(eligible.map(asset=>asset.group))]
-    .sort((a,b)=>(checked[a] ?? -Infinity)-(checked[b] ?? -Infinity))
+    .sort((a,b)=>priority(b)-priority(a) ||
+      (checked[a] ?? -Infinity)-(checked[b] ?? -Infinity))
     .slice(0,maxGroups);
   const due=eligible.filter(asset=>dueGroups.includes(asset.group));
   if (!due.length) return records;

@@ -17,10 +17,10 @@ export function finishHunt(m, now, reason='일시정지') {
   const record={startedAt:m.startedAt,endedAt:now,durationMs:Math.max(0,now-m.startedAt-m.pausedMs),startExp:copy(m.startExp),
     endExp:copy(m.currentExp ? {...m.currentExp,percent:m.currentExp.percent ?? m.percentAnchor?.percent ?? null} : null),gainPercent:Number.isFinite(m.startExp?.percent)&&Number.isFinite(m.percentAnchor?.percent)?Number(m.gainPercent.toFixed(4)):null,fragments:m.fragments};
   m.running=false;m.pausedAt=null;m.endedAt=now;m.reason=reason+' · 다음 경험치 증가 시 새 기록';
-  m.history.unshift(record);m.history=m.history.slice(0,10);
+  m.history=[record,...m.history].slice(0,10);
   return record;
 }
-export function experienceDelta(prev, next) {
+function experienceDelta(prev, next) {
   if(!prev || !next || !Number.isFinite(prev.percent)||!Number.isFinite(next.percent)) return null;
   if(prev.level!=null && next.level!=null && next.level!==prev.level) {
     return next.level===prev.level+1 ? 100-prev.percent+next.percent : null;

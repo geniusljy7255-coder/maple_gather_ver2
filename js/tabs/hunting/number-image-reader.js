@@ -1,4 +1,103 @@
-import {COUNT_IMAGE_SPRITES,COUNT_WORD_MASKS} from '../../data/number-glyphs.js';
+import {COUNT_IMAGE_SPRITES,COUNT_WORD_MASKS,MINUTE_IMAGE_SPRITES} from '../../data/number-glyphs.js';
+
+const minuteMasks = MINUTE_IMAGE_SPRITES.map(({digit,w,h,mask}) => {
+  const ink = [], outline = [];
+  for (let i=0; i<mask.length; i++) {
+    const x=i%w,y=Math.floor(i/w);
+    if (mask[i]!=='1' && mask[i]!=='0') continue;
+    const rivals=MINUTE_IMAGE_SPRITES.filter(sprite=>sprite.w===w && sprite.mask[i]===(mask[i]==='1' ? '0' : '1'));
+    const point=[x,y,1+Math.min(rivals.length,3)*.5];
+    if (mask[i]==='1') ink.push(point);
+    else outline.push(point);
+  }
+  return {digit,w,h,ink,outline};
+});
+
+function matchMinuteImage(pixels,size) {
+  const leftLimit=Math.floor(size*.125), right=Math.ceil(size*.68);
+  const readings = new Map();
+  for (let y=Math.floor(size*.57); y+minuteMasks[0].h<=size; y++) {
+    const hits=Array.from({length:right},()=>[]);
+    for (let x=0; x<right; x++) for (const mask of minuteMasks) {
+      if (x+mask.w>right) continue;
+      const matches = (points,color) => {
+        let matched=0,total=0;
+        for (const [dx,dy,weight] of points) {
+          const pixel=pixels[(y+dy)*size+x+dx];
+          matched+=pixel===color ? weight : pixel===0 ? weight*.22 : 0;
+          total+=weight;
+        }
+        return matched/total;
+      };
+      const ink=matches(mask.ink,1);
+      if (ink<.80) continue;
+      const outline=matches(mask.outline,2);
+      if (outline<.72) continue;
+        const score=.62*ink+.38*outline;
+      if (score>=.84) hits[x].push({digit:mask.digit,end:x+mask.w,score});
+    }
+    const next=hit=>hits.slice(hit.end-2,hit.end+2).flat();
+    const add=(value,score)=>readings.set(value,Math.max(readings.get(value) ?? 0,score));
+    for (let x=0; x<=leftLimit; x++) for (const first of hits[x]) {
+      if (first.digit===0) continue;
+      for (const second of next(first)) {
+        const value=first.digit*10+second.digit;
+        const thirds=value<=18 ? next(second).filter(third=>value*10+third.digit<=180) : [];
+        if (!thirds.length) add(value,(first.score+second.score)/2);
+        for (const third of thirds) {
+          const minutes=value*10+third.digit;
+          add(minutes,(first.score+second.score+third.score)/3+.035);
+        }
+      }
+    }
+  }
+  const [best,next]=[...readings].sort((a,b)=>b[1]-a[1]);
+  if (!best) return {match:null,ambiguous:false};
+  const ambiguous=Boolean(next && best[1]-next[1]<(best[1]>=.96 ? .006 : .018));
+  return {match:ambiguous ? null : best,ambiguous};
+}
+
+export function readMinuteImage(rgba,size) {
+  const probe = (width,phaseX,phaseY) => {
+    const pixels=new Uint8Array(width*width);
+    for (let y=Math.floor(width*.57); y<width; y++) for (let x=0; x<Math.ceil(width*.68); x++) {
+      const sx=Math.floor((x+phaseX)*size/width), sy=Math.floor((y+phaseY)*size/width);
+      const p=(sy*size+sx)*4, r=rgba[p],g=rgba[p+1],b=rgba[p+2];
+      const light=(r+2*g+b)/4;
+      if (light>=120 && b>=r-24 && g>=r-25) pixels[y*width+x]=1;
+      else if (light<104) pixels[y*width+x]=2;
+    }
+    return matchMinuteImage(pixels,width);
+  };
+  const {match:native,ambiguous:nativeAmbiguous}=probe(size,.5,.5);
+  if (size===32 || native?.[1]>=.97) return {minutes:native?.[0] ?? null,ambiguous:nativeAmbiguous};
+  let ambiguous=nativeAmbiguous;
+  const votes=new Map();
+  for (const y of [.2,.35,.5,.65,.8]) for (const x of [.2,.35,.5,.65,.8]) {
+    const result=probe(32,x,y);
+    ambiguous ||= result.ambiguous;
+    if (!result.match) continue;
+    const [value,score]=result.match;
+    const vote=votes.get(value) ?? {count:0,score:0};
+    vote.count++;
+    vote.score=Math.max(vote.score,score);
+    votes.set(value,vote);
+  }
+  const candidates=[...votes];
+  const ranked=candidates.filter(([value])=>value>=100 ||
+    !candidates.some(([other,vote])=>Math.floor(other/10)===value && vote.score>=.92));
+  const [strong,runner]=ranked.sort((a,b)=>b[1].score-a[1].score);
+  if (strong?.[1].score>=.95 && strong[1].score-(runner?.[1].score ?? 0)>=.04) {
+    return {minutes:strong[0],ambiguous:false};
+  }
+  const [best,next]=ranked.sort((a,b)=>b[1].count-a[1].count || b[1].score-a[1].score);
+  if (best && (best[1].count>=2 || best[1].score>=.93) &&
+      (!next || (best[1].count>=next[1].count+2 && best[1].score>=next[1].score))) {
+    return {minutes:best[0],ambiguous:false};
+  }
+  if (next || ambiguous) return {minutes:null,ambiguous:true};
+  return {minutes:native?.[0] ?? null,ambiguous:false};
+}
 
 export function readCountWord(rgba,size){
   if(size!==32)return null;

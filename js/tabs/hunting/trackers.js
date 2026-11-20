@@ -1,4 +1,4 @@
-import { jobInstallers, jobSkill, jobIconFile, jobAlarm, installerIcon, onJobInstallersChange } from "./job-installers.js";
+import { jobInstallers, jobSkill, jobIconFiles, jobAlarm, installerIcon, onJobInstallersChange } from "./job-installers.js";
 import {advanceStackCount,advanceStackClock} from './stack-count.js';
 import { runeScanInterval } from './rune-state.js';
 import {loadExperienceBuffAssets,experienceBuffPending} from './experience-buffs.js';
@@ -12,24 +12,30 @@ async function configureJobInstallers() {
   const previous = jobTargets;
   for (const target of previous) {
     const item=jobInstallers.find(item=>item.id===target.id);
-    if (!item || jobIconFile(item)!==target.file) delete trackers[target.id];
+    if (!item || item.skill!==target.file) delete trackers[target.id];
   }
   const loaded = await Promise.all(jobInstallers.map(async item => {
-    const file = jobIconFile(item);
-    if (!file) return null;
-    const existing = previous.find(target => target.id === item.id && target.file === file);
+    const skill = jobSkill(item);
+    if (!skill) return null;
+    const existing = previous.find(target => target.id === item.id && target.file === skill.id);
     if (existing) return existing;
-    try {
-      const img = await imageData(installerIcon(file));
-      const size = Math.min(img.width, img.height);
-      if (size < 12 || size > 128) return {id:item.id, error:true};
-      const main = crop(img, Math.floor((img.width-size)/2), Math.floor((img.height-size)/2), size, size);
-      // Ignore the outer frame, which differs between supplied skill art and the HUD.
-      for (let y=0; y<size; y++) for (let x=0; x<size; x++) {
-        if (x<2 || y<2 || x>=size-2 || y>=size-2) main.rgba[(y*size+x)*4+3]=0;
+    const artwork = (await Promise.all(jobIconFiles(item).map(async file => {
+      try {
+        const img = await imageData(installerIcon(file));
+        const size = Math.min(img.width, img.height);
+        if (size < 12 || size > 128) return null;
+        const main = crop(img, Math.floor((img.width-size)/2), Math.floor((img.height-size)/2), size, size);
+        // Ignore the outer frame, which differs between supplied skill art and the HUD.
+        for (let y=0; y<size; y++) for (let x=0; x<size; x++) {
+          if (x<2 || y<2 || x>=size-2 || y>=size-2) main.rgba[(y*size+x)*4+3]=0;
+        }
+        return main;
+      } catch {
+        return null;
       }
-      return {id:item.id,file,main,thr:.84,trackingMode:jobSkill(item).trackingMode};
-    } catch { return {id:item.id,error:true}; }
+    }))).filter(Boolean);
+    if (!artwork.length) return {id:item.id,error:true};
+    return {id:item.id,file:skill.id,main:artwork[0],artwork,thr:.84,trackingMode:skill.trackingMode};
   }));
   if (revision !== jobRevision) return;
   jobLoadErrors.clear();
@@ -55,7 +61,7 @@ import { freshState, advance } from './tracking-state.js';
 
 const fresh = t => ({ id: t.id, label: t.label, ...freshState(), trackingMode:t.trackingMode, count:null,last: null });
 export const trackers = Object.fromEntries(TARGETS.map(t => [t.id, fresh(t)]));
-export function resetTrackers() { [...TARGETS,...jobTargets].forEach(t => { trackers[t.id] = fresh(t); }); }
+function resetTrackers() { [...TARGETS,...jobTargets].forEach(t => { trackers[t.id] = fresh(t); }); }
 
 function notifyInstaller(id) {
   const item=jobInstallers.find(item=>item.id===id);
@@ -87,7 +93,7 @@ export function expireInstallers(now) {
   }
 }
 
-export function handleResult(msg) {
+function handleResult(msg) {
   if (!getInfo().active) return;
   const exp=msg.monitor?.exp;
   if (exp?.recheck && (!experienceRetryUntil || msg.t>=experienceRetryUntil+5000)) {
@@ -115,7 +121,7 @@ export function handleResult(msg) {
   }
 }
 
-export function pushConfig() {
+function pushConfig() {
   const list = TARGETS.filter(t => getIcon(t.id, 'buff')).map(t => ({
     id: t.id, thr: getThreshold(t.id), main: getIcon(t.id, 'buff'), reject: getIcon(t.id, 'slot')
   }));

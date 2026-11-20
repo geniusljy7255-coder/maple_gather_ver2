@@ -1,5 +1,4 @@
 /* 화면 공유(getDisplayMedia) 시작/중지와 프레임 수신 */
-import { stats } from './diag.js';
 import { companionSay, notify } from '../../core/notify.js';
 import {gameContentHeight} from './frame-geometry.js';
 
@@ -16,9 +15,6 @@ export function getInfo() {
   const s = track.getSettings();
   return { active: true, width: s.width, height: s.height, fps: s.frameRate, surface: s.displaySurface, label: track.label };
 }
-
-/** 3단계에서 프레임을 분석할 때 쓰는 <video> */
-export const getVideo = () => video;
 
 export async function startCapture() {
   if (stream) return;
@@ -44,19 +40,9 @@ export async function startCapture() {
     cleanup();
     notify('화면 공유가 끊겼어요', 'alert');
   });
-  pumpVideoFrames(v);
   pumpProcessor(t);
   emit();
   companionSay('내가 지켜볼게');
-}
-
-function pumpVideoFrames(v) {
-  if (!v.requestVideoFrameCallback) return;
-  const loop = () => {
-    stats.rvfc.push(Date.now());
-    if (video === v) v.requestVideoFrameCallback(loop);
-  };
-  v.requestVideoFrameCallback(loop);
 }
 
 async function pumpProcessor(t) {
@@ -73,7 +59,6 @@ async function pumpProcessor(t) {
       }
       latest?.close();
       latest = value;                // 가장 최근 프레임을 보관한다 (이전 것은 닫음)
-      stats.proc.push(Date.now());
     }
   } catch (e) { pumpError = String(e?.message || e); }
 }

@@ -32,7 +32,8 @@ const listeners = new Set();
 export let jobInstallers = [];
 try {
   const saved = JSON.parse(localStorage.getItem(key) || '[]');
-  if (Array.isArray(saved)) jobInstallers = saved.filter(item => item && /^job-\d+$/.test(item.id)).slice(0, 12);
+  if (Array.isArray(saved)) jobInstallers = saved.filter(item => item && /^job-\d+$/.test(item.id))
+    .slice(0,12).map(({id,skill})=>({id,skill}));
 } catch {}
 
 export const onJobInstallersChange = listener => listeners.add(listener);
@@ -52,11 +53,12 @@ export function jobAlarm(item) {
   if (!skill) return null;
   return {id:item.id+':'+skill.id,label:alertNames[skill.id] ?? skill.label};
 }
-export function jobIconFile(item) {
+export function jobIconFiles(item) {
   const skill = jobSkill(item);
-  if (!skill) return null;
-  return item.sixth && skill.sixth || !skill.normal ? skill.id + '_6차' : skill.id;
+  if (!skill) return [];
+  return [skill.normal ? skill.id : null, skill.sixth ? skill.id+'_6차' : null].filter(Boolean);
 }
+export const jobIconFile = item => jobIconFiles(item)[0] ?? null;
 function save() {
   try { localStorage.setItem(key, JSON.stringify(jobInstallers)); } catch {}
   listeners.forEach(listener => listener());
@@ -65,15 +67,14 @@ export function addJobInstaller() {
   if (jobInstallers.length >= 12) return;
   let id = 1;
   while (jobInstallers.some(item => item.id === 'job-' + id)) id++;
-  jobInstallers.push({id:'job-' + id, skill:'', sixth:false});
+  jobInstallers.push({id:'job-' + id, skill:''});
   save();
 }
 export function updateJobInstaller(id, changes) {
   const item = jobInstallers.find(item => item.id === id);
   if (!item) return;
-  Object.assign(item, changes);
-  const skill = jobSkill(item);
-  item.sixth = Boolean(skill?.sixth && (item.sixth || !skill.normal));
+  if (typeof changes.skill !== 'string') return;
+  item.skill = changes.skill;
   save();
 }
 export function removeJobInstaller(id) {

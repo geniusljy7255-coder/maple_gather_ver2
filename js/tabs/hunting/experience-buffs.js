@@ -12,6 +12,7 @@ export const experienceBuffGroups=[
 ];
 
 export const experienceBuffIcon = file => new URL('../../../icon/buff/'+encodeURIComponent(file)+'.png',import.meta.url).href;
+export const usesUnframedArtwork = group => ['experience-potion','wealth-potion','gold'].includes(group);
 export const experienceBuffPending = (record,now) => record?.deadline<=now &&
   Number.isFinite(record.pendingSince) && now-record.seenAt<=6500;
 
@@ -37,7 +38,8 @@ export async function loadExperienceBuffAssets(){
     try {
       const image=await imageData(experienceBuffIcon(file));
       const size=Math.min(image.width,image.height);
-      const main=crop(image,Math.floor((image.width-size)/2),Math.floor((image.height-size)/2),size,size);
+      const main=usesUnframedArtwork(group.id) ? crop(image,0,0,image.width,image.height) :
+        crop(image,Math.floor((image.width-size)/2),Math.floor((image.height-size)/2),size,size);
       if (file==='경험치_x배') {
         // The W on the reference icon is replaced by the in-game multiplier.
         for(let y=Math.floor(size*.09);y<Math.ceil(size*.32);y++) {

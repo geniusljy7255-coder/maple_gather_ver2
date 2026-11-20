@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readStackCount,advanceStackCount,advanceStackClock} from '../js/tabs/hunting/stack-count.js';
 import {freshState} from '../js/tabs/hunting/tracking-state.js';
-import {DEATH_BLOSSOM,jobSkills,jobIconFile} from '../js/tabs/hunting/job-installers.js';
+import {DEATH_BLOSSOM,jobSkills,jobIconFiles} from '../js/tabs/hunting/job-installers.js';
 import {readPNG} from './png-fixture.mjs';
 import {resizeIcon,makeTemplate,detect,prepareFrame} from '../js/tabs/hunting/matcher.js';
 const skill='렌_매화검_3초식_예인';
@@ -28,8 +28,8 @@ function countedIcon(base,count){
 test('Ren normal and sixth variants both use the independent count mode',()=>{
  const entry=jobSkills.find(s=>s.id===skill);
  assert.equal(entry.trackingMode,'count');assert.equal(entry.normal,true);assert.equal(entry.sixth,true);
- assert.equal(jobIconFile({skill,sixth:false}),skill);
- assert.equal(jobIconFile({skill,sixth:true}),skill+'_6차');
+ assert.deepEqual(jobIconFiles({skill}),[skill,skill+'_6차']);
+ assert.deepEqual(jobIconFiles({skill:'라라_강줄기_흐르는_곳'}),['라라_강줄기_흐르는_곳']);
 });
 
 test('white corner counts are read without matching the flower artwork as digits',()=>{
@@ -88,12 +88,17 @@ test('worker recognizes both Ren variants and keeps count units in clock mode',a
  globalThis.self={};globalThis.postMessage=m=>messages.push(m);
  try {
   await import('../js/tabs/hunting/detector.worker.js');
+  const artwork=[skill,skill+'_6차'].map(art);
+  self.onmessage({data:{type:'config',generation:1,targets:[
+   {id:'job-1',file:skill,main:artwork[0],artwork,trackingMode:'count',thr:.84}
+  ]}});
+  let time=1000;
   for(const file of [skill,skill+'_6차'])for(const count of [20,1]){
    const base=art(file),icon=countedIcon(base,count),w=640,h=360;
    const rgba=new Uint8ClampedArray(w*h*4);
    for(let y=0;y<32;y++)rgba.set(icon.rgba.subarray(y*32*4,(y+1)*32*4),((10+y)*w+580)*4);
-   self.onmessage({data:{type:'config',generation:1,targets:[{id:'job-1',file,main:base,trackingMode:'count',thr:.84}]}});
-   self.onmessage({data:{type:'frame',generation:1,t:1000,w,h,buffer:rgba.buffer,timerFormat:'clock',externalExperience:true}});
+   self.onmessage({data:{type:'frame',generation:1,t:time,w,h,buffer:rgba.buffer,timerFormat:'clock',externalExperience:true}});
+   time+=500;
    const message=messages.at(-1);assert.equal(message.type,'result',message.message);
    const result=message.results.find(r=>r.id==='job-1');
    assert.equal(result.found,true,file);assert.equal(result.count,count,file);
@@ -129,7 +134,8 @@ test('worker tracks sixth-job Death Blossom across frames and finds it again at 
   const before=detect(prepareFrame(rgba,w,h),{main:standard,thr:.84,minColor:.85,last:{x,y}},{allowScan:false});
   self.onmessage({data:{type:'config',generation:1,targets:[
    {id:'job-2',file:skill,main:art(skill),trackingMode:'count',thr:.84},
-   {id:'job-1',file,main:base,trackingMode:'timer',thr:.84}
+   {id:'job-1',file:DEATH_BLOSSOM,main:art(DEATH_BLOSSOM),
+    artwork:[art(DEATH_BLOSSOM),base],trackingMode:'timer',thr:.84}
   ]}});
   const beforeCasting=new Uint8ClampedArray(w*h*4);
   for(let frame=0;frame<8;frame++){

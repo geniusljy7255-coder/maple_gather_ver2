@@ -775,3 +775,18 @@ body.companion-visible #page { position: relative; z-index: 1; }
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
   gap: .5rem;
 }
+.hunt-select-arrow {
+  position: absolute;
+  top: 50%;
+  right: 0.75rem;
+  width: 0.375rem;
+  height: 0.375rem;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: translateY(-70%) rotate(45deg);
+  pointer-events: none;
+}
+
+select:open + .hunt-select-arrow {
+  transform: translateY(-30%) rotate(225deg);
+}

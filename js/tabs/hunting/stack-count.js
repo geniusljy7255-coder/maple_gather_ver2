@@ -1,7 +1,7 @@
 import {readDigits} from './digits.js';
 import {readScreenText} from './screen-text.js';
 import {readCounterImage,readCountWord} from './number-image-reader.js';
-export const STACK_COUNT_INTERVAL=2000;
+const STACK_COUNT_INTERVAL=2000;
 // 161121005/number contains count icons 1 through 60.
 const MAX_STACK_COUNT=60;
 
