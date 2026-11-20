@@ -46,10 +46,11 @@ function integral(g, w, h) {
 /* ---------- 템플릿 ---------- */
 /** 가운데 절반(숫자 자리)을 뺀 링 모양 마스크 템플릿 */
 export function makeTemplateGray(g, w, h, valid = null, whole = false) {
-  const full=whole===true,cooldown=whole==='cooldown',wideTimer=whole==='wide-timer',minuteTimer=whole==='minute-timer';
-  const x0=full||cooldown||wideTimer||minuteTimer?0:Math.floor(w/8),x1=full?0:cooldown?Math.ceil(w*.75):w-x0,
-    y0=full?0:minuteTimer?Math.floor(h*.55):cooldown?Math.floor(h*.25):Math.floor(h/4),
-    y1=full?0:cooldown||minuteTimer?h:Math.ceil(h*.72);
+  const stack=whole==='stack-count',full=whole===true,cooldown=whole==='cooldown',wideTimer=whole==='wide-timer',minuteTimer=whole==='minute-timer';
+  const x0=stack?Math.floor(w*.38):full||cooldown||wideTimer||minuteTimer?0:Math.floor(w/8),
+    x1=stack?w:full?0:cooldown?Math.ceil(w*.75):w-x0,
+    y0=stack?Math.floor(h*.57):full?0:minuteTimer?Math.floor(h*.55):cooldown?Math.floor(h*.25):Math.floor(h/4),
+    y1=stack?h:full?0:cooldown||minuteTimer?h:Math.ceil(h*.72);
   const dx = [], dy = [], val = [], exx = [], exy = [];
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -256,7 +257,9 @@ export function detect(F, target, { allowScan = true, trackRadius = 3 } = {}) {
       if ((target.colorMode === 'color') !== coloredRune) return false;
     }
     c.color = colorSimilarity(F, main, c.x, c.y);
-    if (c.color < (target.minColor ?? .72)) return false;
+    const strongShape = target.strongShape;
+    const minColor = strongShape && c.s >= strongShape.score ? strongShape.minColor : target.minColor ?? .72;
+    if (c.color < minColor) return false;
     if (reject && zncc(F.G, F.w, F.h, reject.full, c.x, c.y) > c.s + 0.025) return false;
     // 모서리가 버프 아이콘보다 스킬창 아이콘(키 번호 칸)에 확실히 더 가까우면 스킬창으로 보고 제외
     if (reject?.corner && main.corner && cornerScore(F, reject.corner, c.x, c.y) > cornerScore(F, main.corner, c.x, c.y) + 0.1) return false;
@@ -273,12 +276,17 @@ export function detect(F, target, { allowScan = true, trackRadius = 3 } = {}) {
   if (!allowScan) return { found: false, score: Math.max(0, best.s), x: best.x, y: best.y, yellow: 0, mode: 'wait', rejected: false };
 
   mode = 'scan';
+  let fallback;
   for (const c of (target.marker ? scanMarker(F, main) : scanAll(F, main, target.scanOptions))) {
     if (c.s > best.s) best = c;
-    if (accept(c)) return done(F, c, 'scan', false, main,target.readTimer);
+    if (accept(c)) {
+      const hit = done(F, c, 'scan', false, main,target.readTimer);
+      if (!target.preferResult || target.preferResult(hit)) return hit;
+      fallback ??= hit;
+    }
     if (c.s >= thr) rejected = true;
   }
-  return { found: false, score: Math.max(0, best.s), x: best.x, y: best.y, yellow: 0, mode, rejected };
+  return fallback ?? { found: false, score: Math.max(0, best.s), x: best.x, y: best.y, yellow: 0, mode, rejected };
 }
 
 export function iconChroma(F,t,x,y){

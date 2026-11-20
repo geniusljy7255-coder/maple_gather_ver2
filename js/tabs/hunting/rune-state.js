@@ -24,7 +24,9 @@ function confirm(samples,n,now,minutes=false,windowMs=2500){
 export function updateRune(s,results,now){
   let alert=false;
   const gray = (results||[]).find(r=>r.id==='rune_cooldown'&&r.found&&r.identity!==false&&r.chroma);
+  const cooldownLocked=s.cooldownDeadline>now && s.buffDeadline<=now;
   const buffs=(results||[]).filter(r=>r.found&&r.identity!==false&&
+    !cooldownLocked &&
     (s.buffDeadline>now || s.cooldownDeadline<=now)&&
     (r.id==='rune_normal'||r.id==='rune_blessed') &&
     !(gray && Math.abs(gray.x-r.x)<gray.size*.5 && Math.abs(gray.y-r.y)<gray.size*.5));
@@ -94,7 +96,7 @@ export function updateRune(s,results,now){
       if(n.approx&&s.lastMinute===r.seconds&&s.cooldownMode==='minutes')continue;
       if(s.cooldownMode==='seconds'&&predicted>0)continue;
       s.cooldownDeadline=now+n.seconds*1000;s.cooldownApprox=n.approx;s.cooldownMode=n.mode;s.lastMinute=n.approx?r.seconds:null;
-      if (r===gray && s.buffAnchor && now-s.buffConfirmedAt<5000 &&
+      if (r===gray && s.buffAnchor &&
           Math.abs(r.x-s.buffAnchor.x)<r.size*.5 && Math.abs(r.y-s.buffAnchor.y)<r.size*.5) {
         s.buffSeen=0;s.buffDeadline=0;s.buffAnchor=null;s.buffSamples=[];
       }

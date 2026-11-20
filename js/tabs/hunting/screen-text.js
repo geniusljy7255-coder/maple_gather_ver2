@@ -27,9 +27,18 @@ function fragmentGlyphs() {
   if (fragmentBank) return fragmentBank;
   const captured = [
     ['2',['1111100','1001100','0000001','0111111','1000000','1000000','1111111']],
-    ['3',['1111110','0001000','0000001','0011111','0000001','0000001','1111110']]
+    ['3',['1111110','0001000','0000001','0011111','0000001','0000001','1111110']],
+    ['4',['0001100','0011100','0101100','1001100','1111111','0001100','0001100']],
+    ['4',['0001000','0011000','0101000','1001000','1111111','0001000','0001000']],
+    // The quantity UI uses an upright/open-top 4 as well as the diagonal EXP font.
+    ['4',['1000001','1000001','1000001','1111111','0000001','0000001','0000001']],
+    ['4',['1100011','1100011','1100011','1111111','0000011','0000011','0000011']],
+    ['4',['1000010','1000010','1000010','1111111','0000010','0000010','0000010']],
+    ['4',['1100110','1100110','1100110','1111111','0000110','0000110','0000110']],
+    ['4',['1000011','1000011','1000011','1111111','0000011','0000011','0000011']]
   ].map(([char,rows])=>({char,...normalize(Uint8Array.from(rows.join(''),Number),7,7)}));
-  return fragmentBank = captured;
+  return fragmentBank = [...captured,...SCREEN_GLYPHS.filter(g=>/^\d$/.test(g.char) && g.h<=8)
+    .map(g=>({char:g.char,...normalize(Uint8Array.from(g.bits,Number),g.w,g.h)}))];
 }
 function distinguishSimilarExperienceDigits(ranked,glyph) {
   const [best,second]=ranked;
@@ -70,7 +79,8 @@ export function readScreenText(F,box,tone='white', mergeGaps=false){
   if(w<1||h<1)return {text:'',confidence:0};
   const bits=new Uint8Array(w*h),runs=[];
   const clippedWindow = tone.startsWith('exp-event-clipped');
-  const eventThreshold = tone.endsWith('-dim') ? 98 : tone.endsWith('-bright') ? 145 :
+  const eventThreshold = tone.startsWith('exp-event') && tone.endsWith('-dim') ? 98 :
+    tone.startsWith('exp-event') && tone.endsWith('-bright') ? 145 :
     tone==='exp-event' || clippedWindow ? 115 : null;
   for(let y=0;y<h;y++)for(let x=0;x<w;x++){
     const p=((y+y0)*F.w+x+x0)*4,r=F.rgba[p],g=F.rgba[p+1],b=F.rgba[p+2];
@@ -117,7 +127,9 @@ export function readScreenText(F,box,tone='white', mergeGaps=false){
         bits[y*w+x]=dark>=2 ? 1 : 0;
         continue;
       }
-      bits[y*w+x] = tone==='fragment-soft'
+      bits[y*w+x] = tone==='fragment-blue'
+        ? r>=100 && g>=105 && b>=150 && b>=g*.93 && b>=r*.95 ? 1 : 0
+        : tone==='fragment-soft'
         ? r>=132 && g>=105 && b>=150 && b>=g*.93 ? 1 : 0
         : Math.min(r,g,b)>(tone==='fragment-dim' ? 132 : 155) ? 1 : 0;
       continue;
@@ -286,7 +298,10 @@ export function readScreenText(F,box,tone='white', mergeGaps=false){
     }
     if (tone.startsWith('fragment')) {
       const nativeRanked = compare(fragmentGlyphs(),native);
-      const ranked = nativeRanked[0][1]>=.95 ? nativeRanked : compare(glyphBank().filter(g=>/^\d$/.test(g.char)),scores);
+      // Preserve measured fragment matches when the generic bank is consulted.
+      // Previously a slightly degraded 4 lost its native score below .95.
+      const ranked = nativeRanked[0][1]>=.95 ? nativeRanked :
+        compare(glyphBank().filter(g=>/^\d$/.test(g.char)),native);
       const corrected=distinguishSimilarExperienceDigits(ranked,n);
       if (corrected[0][1]<.80 || corrected[0][1]-corrected[1][1]<.025) {text+='?';continue;}
       text+=corrected[0][0];

@@ -1,4 +1,5 @@
-import { jobInstallers, jobIconFile, jobAlarm, installerIcon, onJobInstallersChange } from "./job-installers.js";
+import { jobInstallers, jobSkill, jobIconFile, jobAlarm, installerIcon, onJobInstallersChange } from "./job-installers.js";
+import {advanceStackCount,advanceStackClock} from './stack-count.js';
 import { runeScanInterval } from './rune-state.js';
 import {loadExperienceBuffAssets,experienceBuffPending} from './experience-buffs.js';
 import { loadMonitorAssets, imageData, crop } from './monitor-assets.js';
@@ -27,7 +28,7 @@ async function configureJobInstallers() {
       for (let y=0; y<size; y++) for (let x=0; x<size; x++) {
         if (x<2 || y<2 || x>=size-2 || y>=size-2) main.rgba[(y*size+x)*4+3]=0;
       }
-      return {id:item.id,file,main,thr:.84};
+      return {id:item.id,file,main,thr:.84,trackingMode:jobSkill(item).trackingMode};
     } catch { return {id:item.id,error:true}; }
   }));
   if (revision !== jobRevision) return;
@@ -43,15 +44,16 @@ async function configureJobInstallers() {
 /* 인식 결과 → 설치기 상태(없음 / 유지 중 / 곧 종료)로 바꾸고 알림을 낸다 */
 import { onTick } from '../../core/clock.js';
 import { notify } from '../../core/notify.js';
-import { getInfo, grabFrame, grabExperienceFrame, grabBuffFrame, onCaptureChange } from './capture.js';
+import { getInfo, grabFrame, grabExperienceFrame, onCaptureChange } from './capture.js';
 import { TARGETS, getIcon, getThreshold, loadIcons, onIconsChange } from './icons.js';
-import { startDetector, configure, analyze, analyzeBuffFrame, canAnalyze, startExperienceDetector, resetExperienceDetector,
+import { startDetector, configure, analyzeInstallers, analyzeMonitor, canAnalyzeInstallers, canAnalyzeMonitor,
+  startExperienceDetector, resetExperienceDetector,
   hasExperienceDetector, canAnalyzeExperience, analyzeExperienceFrame } from './detector.js';
 
 import { freshState, advance } from './tracking-state.js';
 
 
-const fresh = t => ({ id: t.id, label: t.label, ...freshState(), last: null });
+const fresh = t => ({ id: t.id, label: t.label, ...freshState(), trackingMode:t.trackingMode, count:null,last: null });
 export const trackers = Object.fromEntries(TARGETS.map(t => [t.id, fresh(t)]));
 export function resetTrackers() { [...TARGETS,...jobTargets].forEach(t => { trackers[t.id] = fresh(t); }); }
 
@@ -69,10 +71,13 @@ function notifyInstaller(id) {
 
 export function expireInstallers(now) {
   for (const tracker of Object.values(trackers)) {
+    if(tracker.trackingMode==='count') {
+      if(advanceStackClock(tracker,now))notifyInstaller(tracker.id);
+      continue;
+    }
     if (tracker.deadline === null) continue;
     if (now >= tracker.deadline && !tracker.needsReinstall) {
       tracker.needsReinstall = true;
-      tracker.recoveryUntil = now + 8000;
     }
     const lead=tracker.id.startsWith('job-') ? 0 : 3000;
     if (now >= tracker.deadline - lead && !tracker.alerted) {
@@ -90,38 +95,23 @@ export function handleResult(msg) {
   } else if (exp?.value && !exp.recheck) {
     experienceRetryUntil=0;
   }
-  if (msg.type==='experience-ready' || msg.type==='buff-ready') {
+  if (msg.monitor) {
     handleMonitor(msg);
     return;
   }
   expireInstallers(msg.t);
-  handleMonitor(msg);
-  const lost = msg.results.some(r => trackers[r.id]?.deadline > msg.t &&
-    !r.found && r.mode === 'scan');
-  if (lost && msg.t >= nextRecoveryAt) {
-    fastUntil = Math.max(fastUntil,msg.t+2500);
-    nextRecoveryAt = msg.t+15000;
-  }
-  if (msg.results.some(r => r.found && trackers[r.id]?.deadline == null && trackers[r.id]) &&
-      msg.t >= nextRecoveryAt) {
-    fastUntil = Math.max(fastUntil,msg.t+2500);
-    nextRecoveryAt = msg.t+15000;
-  }
   for (const r of msg.results) {
     const tr = trackers[r.id];
 
     if (!tr) continue;
     tr.last = r;
-    if (r.found) {
-      tr.lastSeen = msg.t;
-      if ((tr.deadline === null || tr.needsReinstall) &&
-          msg.t >= (tr.nextTimerRetryAt ?? 0)) {
-        tr.nextTimerRetryAt = msg.t + 8000;
-        tr.recoveryUntil = Math.max(tr.recoveryUntil ?? 0,msg.t + 3200);
-      }
+    if(tr.trackingMode==='count') {
+      if(r.found)tr.lastSeen=msg.t;
+      if(advanceStackCount(tr,r,msg.t))notifyInstaller(tr.id);
+      continue;
     }
+    if (r.found) tr.lastSeen = msg.t;
     advance(tr, r, msg.t);
-    if (tr.deadline > msg.t && !tr.needsReinstall) tr.recoveryUntil = 0;
   }
 }
 
@@ -129,108 +119,64 @@ export function pushConfig() {
   const list = TARGETS.filter(t => getIcon(t.id, 'buff')).map(t => ({
     id: t.id, thr: getThreshold(t.id), main: getIcon(t.id, 'buff'), reject: getIcon(t.id, 'slot')
   }));
-  configure([...list,...extraTargets,...jobTargets],experienceBuffAssets,captureRevision);
+  configure([...list,...jobTargets],extraTargets,experienceBuffAssets,captureRevision);
 }
 
-const refreshMs = 5000;
-const confirmationMs = 500;
-let lastGrab = 0;
-let burstStartedAt = 0;
-let burstFrames = 0;
-let retryAt = 0;
-let fastUntil = 0;
-let initialExpUntil = 0;
-let nextRecoveryAt = 0;
+let lastInstallerGrab = 0;
+let lastMonitorGrab = 0;
 let lastExperienceGrab = 0;
 let experienceRetryUntil = 0;
 let lastRuneGrab = 0;
-let lastBuffGrab = 0;
 const experienceInterval = now => !sessionState.hunt.lastExp || now<experienceRetryUntil ? 750 : 5000;
-function sendFullFrame(img,now,externalExperience) {
-  const scanRune=now-lastRuneGrab>=runeScanInterval(sessionState.rune,now);
-  const fragmentsReadAt=sessionState.vision.fragmentsReadAt ?? 0;
-  const scanFragments=!fragmentsReadAt || now-fragmentsReadAt>=10000;
-  const scanExperience=!externalExperience && now-lastExperienceGrab>=experienceInterval(now);
-  if (!analyze(img,now,null,externalExperience,scanRune,scanFragments,scanExperience)) return false;
-  if (scanRune) lastRuneGrab=now;
-  if (scanExperience) lastExperienceGrab=now;
-  return true;
-}
+
 function submitFrame(now) {
-  const info=getInfo();
+  const info = getInfo();
   if (!info.active) return;
-  const externalExperience=info.surface==='window' && hasExperienceDetector();
+  const externalExperience = info.surface==='window' && hasExperienceDetector();
   if (externalExperience && now-lastExperienceGrab>=experienceInterval(now) && canAnalyzeExperience()) {
-    const frame=grabExperienceFrame();
-    if (frame && analyzeExperienceFrame(frame,now)) lastExperienceGrab=now;
+    const frame = grabExperienceFrame();
+    if (frame && analyzeExperienceFrame(frame,now)) lastExperienceGrab = now;
   }
-  if (!canAnalyze(now)) return;
-  if (!lastBuffGrab && experienceBuffAssets.length) {
-    const frame=grabBuffFrame();
-    if (frame && analyzeBuffFrame(frame,now)) {
-      lastBuffGrab=now;
-      return;
+  const needsConfirmation = Object.values(trackers).some(tr => tr.trackingMode==='count'
+    ? tr.count == null || tr.count<=3
+    : tr.deadline === null || tr.needsReinstall);
+  const installerInterval = needsConfirmation ? 300 : 500;
+  const scanInstallers = now-lastInstallerGrab>=installerInterval && canAnalyzeInstallers(now);
+  const pendingBuff = Object.values(sessionState.vision.expBuffs ?? {}).some(record=>experienceBuffPending(record,now));
+  const monitorInterval = pendingBuff ? 500 : sessionState.booster.deadline>now ? 750 : 1250;
+  const scanMonitor = now-lastMonitorGrab>=monitorInterval && canAnalyzeMonitor(now);
+  if (!scanInstallers && !scanMonitor) return;
+  const frame = grabFrame();
+  if (!frame) return;
+  const monitorFrame = scanInstallers && scanMonitor ? {...frame,data:frame.data.slice()} : frame;
+  if (scanInstallers && analyzeInstallers(frame,now)) lastInstallerGrab = now;
+  if (scanMonitor) {
+    const scanRune = now-lastRuneGrab>=runeScanInterval(sessionState.rune,now);
+    const scanFragments = now-(sessionState.vision.fragmentsReadAt ?? 0)>=10000;
+    const scanExperience = !externalExperience && now-lastExperienceGrab>=experienceInterval(now);
+    if (analyzeMonitor(monitorFrame,now,externalExperience,scanRune,scanFragments,scanExperience)) {
+      lastMonitorGrab = now;
+      if (scanRune) lastRuneGrab = now;
+      if (scanExperience) lastExperienceGrab = now;
     }
-  }
-  if (now < fastUntil || (now < initialExpUntil &&
-      ((!externalExperience && !sessionState.hunt.lastExp) || sessionState.hunt.latestFragments === null))) {
-    if (now-lastGrab < 250) return;
-    const img = grabFrame();
-    if (img && sendFullFrame(img,now,externalExperience)) {
-      if (initialExpUntil===Infinity) initialExpUntil=now+8000;
-      lastGrab=now;
-      burstFrames=0;
-      retryAt=now+refreshMs;
-    }
-    return;
-  }
-  // Check all recovering installers on the same frame.
-  if (!burstFrames && now < retryAt) {
-    const waiting = Object.values(trackers).filter(tr => tr.needsReinstall ||
-      (tr.deadline === null && tr.recoveryUntil > now));
-    const pending=Object.values(sessionState.vision.expBuffs ?? {}).some(record=>experienceBuffPending(record,now));
-    const interval=pending ? 500 : sessionState.booster.deadline>now ? 750 : 1250;
-    if (now-lastBuffGrab>=interval && (!waiting.length || lastBuffGrab<=lastGrab)) {
-      const frame=grabBuffFrame();
-      if (frame && analyzeBuffFrame(frame,now)) {lastBuffGrab=now;return;}
-    }
-    if (!waiting.length || now-lastGrab < 600) return;
-    const img = grabFrame();
-    if (img && analyze(img,now,waiting.map(target=>target.id))) lastGrab=now;
-    return;
-  }
-  if (!burstFrames && now >= retryAt) {
-    burstStartedAt = now;
-    burstFrames = 3;
-  }
-  if (!burstFrames || now - lastGrab < confirmationMs) return;
-  const img = grabFrame();
-  if (img && sendFullFrame(img,now,externalExperience)) {
-    lastGrab = now;
-    if (--burstFrames === 0) retryAt = burstStartedAt + refreshMs;
   }
 }
 export async function initTracking() {
-  startDetector(result => {
+  const onResult = result => {
     handleResult(result);
     submitFrame(Date.now());
-  });
-  startExperienceDetector();
+  };
+  startDetector(onResult);
+  startExperienceDetector(onResult);
   onIconsChange(pushConfig);
   onCaptureChange(info => {
     captureRevision++;
     const now=Date.now();
-    fastUntil = info.active ? now+4000 : 0;
-    // Keep the startup window available until the browser delivers a frame.
-    initialExpUntil = info.active ? Infinity : 0;
-    nextRecoveryAt = fastUntil+5000;
-    burstFrames = 0;
-    retryAt = 0;
-    lastGrab = 0;
+    lastInstallerGrab = 0;
+    lastMonitorGrab = 0;
     lastExperienceGrab = 0;
     experienceRetryUntil = 0;
     lastRuneGrab = 0;
-    lastBuffGrab = 0;
     resetExperienceDetector();
     if (!info.active) captureEnded();
     resetTrackers();
@@ -238,14 +184,14 @@ export async function initTracking() {
     if (info.active) submitFrame(now);
   });
   onJobInstallersChange(configureJobInstallers);
+  onTick(now => {
+    if (getInfo().active) expireInstallers(now);
+    submitFrame(now);
+  });
   await loadIcons();
   await configureJobInstallers();
   const [assets,buffs]=await Promise.all([loadMonitorAssets(),loadExperienceBuffAssets()]);
   extraTargets=assets.targets;experienceBuffAssets=buffs.assets;
   sessionState.vision.assets=[...assets.missing,...buffs.missing];
   pushConfig();
-  onTick(now => {
-    if (getInfo().active) expireInstallers(now);
-    submitFrame(now);
-  });
 }

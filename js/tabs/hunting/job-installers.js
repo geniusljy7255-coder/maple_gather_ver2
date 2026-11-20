@@ -1,11 +1,16 @@
+export const DEATH_BLOSSOM = '칼리_데스_블로섬';
+export const isDeathBlossom = file => file === DEATH_BLOSSOM || file === DEATH_BLOSSOM + '_6차';
+
 const files = [
+  '렌_매화검_3초식_예인',
+  '렌_매화검_3초식_예인_6차',
   "라라_강줄기_흐르는_곳",
   "섀도어_다크_플레어",
   "섀도어_다크_플레어_6차",
   "은월_소혼_장막",
   "은월_소혼_장막_6차",
-  "칼리_데스_블로섬",
-  "칼리_데스_블로섬_6차",
+  DEATH_BLOSSOM,
+  DEATH_BLOSSOM + '_6차',
   "캡틴_배틀쉽_봄버",
   "캡틴_배틀쉽_봄버_6차",
   "캡틴_시즈_봄버",
@@ -17,7 +22,9 @@ export const installerIcon = file => new URL('../../../icon/hunting/' + encodeUR
 
 export const jobSkills = [...new Set(files.map(file => file.replace(/_6차$/, '')))].map(id => {
   const [job, ...skill] = id.split('_');
-  return {id, label: job + ' - ' + skill.join(' '), normal: files.includes(id), sixth: files.includes(id + '_6차')};
+  const counted=id==='렌_매화검_3초식_예인';
+  return {id, label: counted ? '렌 - 매화검 3초식: 예인' : job + ' - ' + skill.join(' '),
+    trackingMode:counted ? 'count' : 'timer', normal: files.includes(id), sixth: files.includes(id + '_6차')};
 });
 
 const key = 'hunt_job_installers';
@@ -31,6 +38,7 @@ try {
 export const onJobInstallersChange = listener => listeners.add(listener);
 export const jobSkill = item => jobSkills.find(skill => skill.id === item.skill);
 const alertNames={
+  렌_매화검_3초식_예인:'예인',
   라라_강줄기_흐르는_곳:'강줄기',
   섀도어_다크_플레어:'플레어',
   은월_소혼_장막:'소혼장막',

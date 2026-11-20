@@ -1,4 +1,4 @@
-import { getTimerFormat, setTimerFormat } from './detector.js';
+import { getTimerFormat, setTimerFormat, status as detectorStatus } from './detector.js';
 import { jobInstallers, jobSkill, jobIconFile, installerIcon, jobAlarm, onJobInstallersChange } from './job-installers.js';
 import {runePresentation} from './rune-state.js';
 import {experienceBuffGroups,experienceBuffIcon,summarizeExperienceBuffs} from './experience-buffs.js';
@@ -6,7 +6,7 @@ import {experienceBuffGroups,experienceBuffIcon,summarizeExperienceBuffs} from '
 import { $, setText } from '../../core/dom.js';
 import { formatHMS, formatMS } from '../../core/format.js';
 import { unlockAudio, notify, getVoice, setVoice, getVoiceVolume, setVoiceVolume, ALARM_CHANNELS, isAlarmEnabled, setAlarmEnabled } from '../../core/notify.js';
-import { startCapture, stopCapture, getInfo, onCaptureChange } from './capture.js';
+import { startCapture, stopCapture, getInfo, getGrabError, onCaptureChange } from './capture.js';
 import * as S from './session.js';
 import { installersHtml, renderInstallers, bindJobInstallers, iconLabel, installerPresentation } from './installers.js';
 
@@ -18,8 +18,6 @@ const SURFACE = { window: '창', monitor: '전체 화면', browser: '브라우�
 const boosterIcons = [
   ['vip_부스터.png', 'VIP 부스터'],
   ['HEXA_부스터.png', 'HEXA 부스터'],
-  ['수상한_돋보기_부스터.png', '수상한 돋보기 부스터'],
-  ['탐정예티의_수상한_돋보기_부스터.png', '탐정예티의 수상한 돋보기 부스터']
 ];
 
 const dashCard = (label, valueHtml) => `
@@ -39,6 +37,8 @@ export const html = `
       </div>
       <p id="huntPipStatus" class="hint" role="status"></p>
       <p id="huntShareInfo" class="hint break-words"></p>
+      <p class="hint">퀵슬롯 &amp; 버프 시간 표시는 ‘중앙, 크게’로 설정해 주세요.</p>
+      <p class="hint">솔 에르다 조각은 게임 내 전용 UI를 켜 두어야 수량을 인식할 수 있어요.</p>
       <p id="huntShareWarn" class="hidden text-xs text-amber-700"></p>
     </section>
     <section class="min-w-0 space-y-3 pt-4 md:pl-4 md:pt-0">
@@ -78,7 +78,6 @@ export const html = `
     </div>
     <div id="huntExpDetail" class="hint"></div>
   </div>
-  <p id="huntMeasureState" class="hint"></p>
   <details class="card">
     <summary class="cursor-pointer text-sm font-bold">최근 사냥 기록</summary>
     <div class="mt-2 overflow-x-auto">
@@ -190,9 +189,9 @@ function renderShare() {
   btn.textContent = i.active ? '화면 공유 중지' : '화면 공유 시작';
   btn.className = i.active ? BTN_DANGER : BTN_PRIMARY;
 
-  setText('huntShareInfo', i.active ? `${i.width}×${i.height} · ${SURFACE[i.surface] || '알 수 없음'} 공유 중${i.label ? ` (${i.label})` : ''}` : '공유할 게임 창을 선택하세요.');
+  setText('huntShareInfo', '화면 공유 시작 버튼을 눌러 MapleStory 화면을 공유 해주세요.');
 
-  const warn = i.active ? surfaceWarn(i.surface) : shareError;
+  const warn = i.active ? getGrabError() || detectorStatus.error || surfaceWarn(i.surface) : shareError;
   setText('huntShareWarn', warn);
   $('huntShareWarn').classList.toggle('hidden', !warn);
 }
@@ -204,6 +203,8 @@ const pipFields = [
   ['솔 에르다 조각', 'huntFragments'],
   ['아이템 회수', 'collectLeft'],
   ['룬', 'runeState'],
+  ['VIP 부스터', 'hunt-vip-booster'],
+  ['경험치 버프 종합시간', 'hunt-exp-buff-total'],
   ['솔 야누스', 'trk-janus-state'],
   ['에르다 파운틴', 'trk-fountain-state']
 ];
@@ -213,6 +214,8 @@ let pipStrip = null;
 let pipControls = [];
 let pipJobKey = '';
 const pipIcons = {
+  'hunt-exp-buff-total': experienceBuffIcon(experienceBuffGroups[0].files[0]),
+  'hunt-vip-booster': new URL('../../../icon/hunting/vip_부스터.png',import.meta.url).href,
   collectLeft: new URL('../../../icon/메소.png',import.meta.url).href,
   huntExp: new URL('../../../icon/경험치.png',import.meta.url).href,
   huntFragments: new URL('../../../icon/솔_에르다_조각.png',import.meta.url).href,
@@ -282,6 +285,8 @@ function makePipColumn(doc, featured = false) {
 }
 
 function pipTimeColor(text, fallback = 'var(--ink)') {
+  const count=text.match(/^(\d+)개$/);
+  if(count)return Number(count[1])<=1 ? 'var(--pip-danger)' : 'var(--pip-success)';
   const clock = text.match(/(?:^|\s)(\d+):(\d{2})(?![:\d])/);
   const seconds = clock ? Number(clock[1])*60 + Number(clock[2]) : Number(text.match(/(\d+)초/)?.[1]);
   if (/재설치|다시 설치/.test(text) || seconds <= 5) return 'var(--pip-danger)';
@@ -290,6 +295,8 @@ function pipTimeColor(text, fallback = 'var(--ink)') {
 }
 
 function compactPipInstaller(text) {
+  const count=text?.match(/\d+개/);
+  if(count)return count[0];
   return text?.match(/\d+초/)?.[0] ?? (text?.includes('다시 설치') ? '재설치' : '—');
 }
 
@@ -330,7 +337,7 @@ function renderPip(now) {
   const jobKey = JSON.stringify(entries.map(item => [item.id,jobIconFile(item)]));
   if (jobKey !== pipJobKey) {
     pipJobKey = jobKey;
-    while (pipStrip.children.length > 4) pipStrip.lastElementChild.remove();
+    while (pipStrip.children.length > Math.ceil((pipFields.length+1)/2)) pipStrip.lastElementChild.remove();
     pipJobCards.clear();
     const doc = pipWindow.document;
     let column;
@@ -366,7 +373,7 @@ async function togglePip() {
   button.disabled = true;
   try {
     const jobColumns = Math.ceil(jobInstallers.filter(jobSkill).length / 2);
-    const width = Math.min(565 + jobColumns * 106, globalThis.screen?.availWidth || 1000);
+    const width = Math.min(671 + jobColumns * 106, globalThis.screen?.availWidth || 1000);
     const win = await api.requestWindow({width,height:105});
     pipWindow = win;
     const doc = win.document;
@@ -462,7 +469,7 @@ export function bind() {
     try {
       await startCapture();
     } catch (e) {
-      shareError = e?.name === 'NotAllowedError' ? '화면 공유가 취소되었어요.' : `화면 공유를 시작하지 못했어요: ${e?.message || e}`;
+      shareError = e?.name === 'NotAllowedError' ? '' : `화면 공유를 시작하지 못했어요: ${e?.message || e}`;
     }
     renderShare();
   });
@@ -565,8 +572,6 @@ const dateTime=new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',year:'nume
 const percent=value=>value==null?'미확인':Number(value).toFixed(4)+'%';
 function renderMeasurements(now){
   const h=S.state.hunt,r=S.state.rune,v=S.state.vision,sharing=getInfo().active;
-  const measureReason=(h.running||h.manuallyEnded)?h.reason:v.exp?.value?.raw?h.reason:(v.exp?.reason||'경험치 숫자 인식 대기');
-  setText('huntMeasureState',h.manuallyEnded ? '측정 종료 · 측정 시작 버튼으로 시작' : measureReason+' · 실제 경험치 숫자 증가로 시작');
   const lastPercent = h.percentAnchor?.percent ?? h.lastExp?.percent;
   const gainedPercent = Number.isFinite(h.startExp?.percent) && Number.isFinite(lastPercent);
   setText('huntExp', h.startExp
@@ -584,10 +589,11 @@ function renderMeasurements(now){
   $('huntExpBar').style.width = percentKnown ? currentPercent + '%' : '0%';
   if (percentKnown) progress.setAttribute('aria-valuenow', String(currentPercent));
   else progress.removeAttribute('aria-valuenow');
-  setText('huntFragments', '+'+h.fragments+'개');
   setText('huntFragmentsDetail',
+    h.latestFragments===null ? '조각 아이콘 탐색 중' :
     '시작 '+(h.fragmentStart === null ? '—' : h.fragmentStart+'개')+
-    ' → 현재 '+(h.latestFragments === null ? '—' : h.latestFragments+'개'));
+    ' → 현재 '+h.latestFragments+'개');
+  setText('huntFragments', h.latestFragments===null ? '—' : '+'+h.fragments+'개');
   const rune=runePresentation(r,now);
   const summary=sharing ? summarizeExperienceBuffs(v.expBuffs,now) : null;
   setText('hunt-exp-buff-total',summary ? formatBuffTime(summary.deadline-now,summary.approx) : '--:--');

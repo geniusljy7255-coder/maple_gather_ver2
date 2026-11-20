@@ -1,9 +1,10 @@
 import {detect,makeTemplate,resizeIcon} from './matcher.js';
 import {applyTimerFormat,readDigits} from './digits.js';
 import {readScreenText} from './screen-text.js';
-import {observeExperienceBuff,experienceBuffHud,experienceBuffPending} from './experience-buffs.js';
+import {observeExperienceBuff,experienceBuffPending} from './experience-buffs.js';
 
-const sizes=[32,45,44,31,33,27,28,30,34,36,40,48,24,56,64];
+const sizes=[...new Set([32,45,44,31,33,27,28,30,34,36,40,48,24,56,64,
+  ...Array.from({length:49},(_,i)=>i+16)])];
 const similarGroups={multiplier:'bonus',bonus:'multiplier',
   'experience-potion':'wealth-potion','wealth-potion':'experience-potion'};
 const sameSlot=(a,b)=>Math.abs(a.x-b.x)<a.size*.40 && Math.abs(a.y-b.y)<a.size*.40;
@@ -222,7 +223,7 @@ function findAsset(region,asset,large,format,neighbors=[],coupons=[]) {
       readTimer:false,acceptPosition,last:asset.last},{allowScan:false,trackRadius:2});
     if(hit.found){
       const reading=readTimer(hit,main,format,region);
-      if(reading.seconds){
+      if(reading.seconds || !expIdentityGroup(asset.group)){
         asset.last={x:hit.x,y:hit.y,size,mode};
         return {hit,main,mode,reading,file:asset.file,group:asset.group};
       }
@@ -359,7 +360,7 @@ function identifyBuff(candidate,region,assets) {
   return {...candidate.reading,multiplier:group==='multiplier' ? multiplier : null};
 }
 
-export function scanExperienceBuffs(detector,frame,now,cropFrame,onlyPending=false,cropped=onlyPending){
+export function scanExperienceBuffs(detector,frame,now,{onlyPending=false,maxGroups=Infinity}={}){
   const {assets,records,checked,misses}=detector;
   if (detector.format!==frame.timerFormat) {
     detector.format=frame.timerFormat;
@@ -371,7 +372,7 @@ export function scanExperienceBuffs(detector,frame,now,cropFrame,onlyPending=fal
   const isUnion=asset=>asset.group==='luck' || asset.group==='wealth';
   const besideUnion=asset=>asset.group==='vip' || asset.group==='gold';
   const unionSeen=assets.some(asset=>isUnion(asset) && asset.last);
-  const due=assets.filter(asset=>{
+  const eligible=assets.filter(asset=>{
     const record=records[asset.group];
     const pending=experienceBuffPending(record,now);
     const active=record?.deadline>now;
@@ -385,10 +386,13 @@ export function scanExperienceBuffs(detector,frame,now,cropFrame,onlyPending=fal
         (often ? 2500 : 3000*2**Math.max(0,(misses[asset.group] ?? 0)-1));
     return now-(checked[asset.group] ?? -Infinity)>=interval;
   });
+  const dueGroups=[...new Set(eligible.map(asset=>asset.group))]
+    .sort((a,b)=>(checked[a] ?? -Infinity)-(checked[b] ?? -Infinity))
+    .slice(0,maxGroups);
+  const due=eligible.filter(asset=>dueGroups.includes(asset.group));
   if (!due.length) return records;
-  const {x,h}=experienceBuffHud(frame.w,frame.h);
-  const region=cropped ? frame : cropFrame(frame,x,0,frame.w-x,h).frame;
-  const large=(frame.sourceWidth ?? frame.w)>=1800;
+  const region=frame;
+  const large=frame.w>=1800;
   const coupons=assets.filter(asset=>expIdentityGroup(asset.group));
   const hits=due.filter(asset=>asset.group!=='bonus' && !besideUnion(asset))
     .map(asset=>findAsset(region,asset,large,frame.timerFormat,[],coupons)).filter(Boolean);
@@ -416,7 +420,9 @@ export function scanExperienceBuffs(detector,frame,now,cropFrame,onlyPending=fal
       }
       return matchScore(other)>=matchScore(candidate)-.04;
     }));
-    const candidate=candidates.find(hit=>hit.reading.seconds) ?? candidates[0];
+    const lastFile=records[group]?.sample?.file;
+    const candidate=candidates.find(hit=>hit.file===lastFile && hit.reading.seconds) ??
+      candidates.find(hit=>hit.reading.seconds) ?? candidates[0];
     if (!candidate) {
       if (!experienceBuffPending(records[group],now)) misses[group]=Math.min((misses[group] ?? 0)+1,3);
       continue;

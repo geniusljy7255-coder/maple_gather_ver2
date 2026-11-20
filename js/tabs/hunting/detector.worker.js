@@ -4,22 +4,56 @@ import { makeTemplate, prepareFrame, detect, resizeIcon } from './matcher.js';
 import { applyTimerFormat, readDigits } from './digits.js';
 import { analyzeExperience, analyzeScreen, resetScreenMonitor } from './screen-monitor.js';
 import {createExperienceBuffDetector,scanExperienceBuffs} from './experience-buff-detector.js';
-import {experienceBuffHud} from './experience-buffs.js';
-import {readVipBooster,vipBoosterRegion} from './vip-booster.js';
+import {readVipBooster} from './vip-booster.js';
+import {readStackCount} from './stack-count.js';
+import {isDeathBlossom} from './job-installers.js';
 
 const SIZES = [32, 45, 44, 24, 28, 20, 26, 30, 22, 18, 16, 34, 36, 40, 48, 64];
 // Keep the common sizes first, then cover intermediate UI scales.
 const INSTALLER_SIZES = [...new Set([
   ...SIZES, ...Array.from({length:49}, (_, i) => i+16), 68,72,76,80,88,96
 ])];
-let targets = [], generation = 0, dimensions = '', scanCursor = 0, localCursor = 0;
+let targets = [], generation = 0, dimensions = '', scanCursor = 0;
+let installerSize = null;
 let experienceBox = null;
+let boosterDimensions = '', boosterTile = 0, lastBoosterTile = null;
 let buffDetector=createExperienceBuffDetector([]),buffConfig='',buffDimensions='';
 const isLara = target => target.file?.startsWith('라라_');
 const isInstaller = target => target.id === "janus" || target.id === "fountain" || target.id.startsWith("job-");
 const runeTypes = ['rune_normal','rune_blessed','rune_cooldown'];
 const isCaptainBomber = target => target.file?.startsWith('캡틴_');
+const isBattleship = target => target.file?.includes('배틀쉽_봄버');
 const tpl = (img,whole=false) => makeTemplate(img.rgba, img.w, img.h,whole);
+
+function readBlossomTimer(hit, format) {
+  const options = {
+    area:[.27,.378,.74,.667],min:1,goldTimer:true,aligned:true
+  };
+  const outlined = readDigits(hit.preview,hit.size,{...options,goldRatio:.82,outlinedGold:true});
+  const reading = outlined.seconds !== null ? outlined : readDigits(hit.preview,hit.size,options);
+  return applyTimerFormat(reading,format);
+}
+
+function readInstallerClock(hit, background) {
+  const wide = {area:[.02,.24,1,.79],min:1,aligned:true};
+  const strip = {...wide,area:[.125,.36,.875,.67]};
+  for (const settings of [{...wide,background},{...strip,faintYellow:true},
+    {...wide,faintYellow:true,background}]) {
+    const clock = readDigits(hit.preview,hit.size,{...settings,clockOnly:true});
+    if (clock.seconds !== null) return clock;
+  }
+  let inferred, seconds;
+  for (const settings of [{...strip,background},strip]) {
+    const reading = applyTimerFormat(readDigits(hit.preview,hit.size,settings),'clock');
+    if (reading.seconds === null) continue;
+    if (reading.clock) {
+      if (!inferred || reading.confidence > inferred.confidence) inferred = reading;
+    } else if (!seconds || reading.confidence > seconds.confidence) {
+      seconds = reading;
+    }
+  }
+  return inferred ?? (hit.clock ? hit : seconds) ?? {seconds:null,confidence:0,digit:'uncertain'};
+}
 
 function cropFrame(frame, x, y, w, h) {
   const pixels = new Uint8ClampedArray(w * h * 4);
@@ -48,12 +82,34 @@ function trackInCrop(frame,variant,radius,variantAt) {
 const windowCooldown = makeTemplate(WINDOW_RUNE_COOLDOWN.rgba,32,32,true);
 
 const isBuff = target => target.id !== 'rune_marker' && target.id !== 'fragments_icon';
-function readExperienceBuffs(frame,now,dimensions,onlyPending=false,cropped=onlyPending) {
+function readExperienceBuffs(frame,now,dimensions) {
   if (buffDimensions!==dimensions) {
     buffDimensions=dimensions;
     for (const asset of buffDetector.assets) asset.last=null;
   }
-  return scanExperienceBuffs(buffDetector,frame,now,cropFrame,onlyPending,cropped);
+  return scanExperienceBuffs(buffDetector,frame,now,{maxGroups:frame.w>=1800 ? 1 : 2});
+}
+
+function findVipBooster(frame) {
+  const size = frame.w+'x'+frame.h;
+  if (size !== boosterDimensions) {
+    boosterDimensions = size;
+    boosterTile = 0;
+    lastBoosterTile = null;
+  }
+  const w = Math.min(frame.w,Math.max(180,Math.ceil(frame.w*.38)));
+  const h = Math.min(frame.h,Math.max(100,Math.ceil(frame.h*.38)));
+  for (const tile of new Set([lastBoosterTile,boosterTile++%16,boosterTile++%16])) {
+    if (tile === null) continue;
+    const x = Math.round((tile%4)*(frame.w-w)/3);
+    const y = Math.round(Math.floor(tile/4)*(frame.h-h)/3);
+    const timer = readVipBooster(cropFrame(frame,x,y,w,h).frame);
+    if (timer === null) continue;
+    lastBoosterTile = tile;
+    return timer;
+  }
+  lastBoosterTile = null;
+  return null;
 }
 
 self.onmessage = ({ data }) => {
@@ -68,54 +124,51 @@ self.onmessage = ({ data }) => {
         buffDimensions='';
       }
       targets = data.targets.map(t => ({
-        id: t.id, file: t.file, cursor: 0, localSize: 0, locked: null, misses: 0,
-        variants: [...new Set([t.main.w, ...(isInstaller(t) ? INSTALLER_SIZES : t.sizes || SIZES)])].map(size => ({
+        id: t.id, file: t.file, trackingMode:t.trackingMode, cursor: 0, lastScan: 0, locked: null, misses: 0,
+        installerAttempts: 0, lastMatchedSize: null,
+        variants: [...new Set([t.main.w, ...(isInstaller(t) ? INSTALLER_SIZES : t.sizes || SIZES),
+          ...(t.id==='fragments_icon' || runeTypes.includes(t.id) ? Array.from({length:45},(_,i)=>i+20) : [])])].map(size => ({
           thr: !t.id.startsWith('job-') && isInstaller(t) && size >= 40 && size !== t.main.w ? t.thr-.045 : t.thr,
           minColor:t.id.startsWith('job-') ? .85 : undefined,
-          colorMode:t.colorMode, marker: !!t.marker, main: tpl(resizeIcon(t.fhd && size >= 15 ? t.fhd : t.main, size),isLara(t) ? 'wide-timer' : t.whole),
+          strongShape:isDeathBlossom(t.file) ? {score:.92,minColor:.78} : undefined,
+          readTimer:t.trackingMode==='count' ? false : undefined,
+          colorMode:t.colorMode, marker: !!t.marker, main: tpl(resizeIcon(t.fhd && size >= 15 ? t.fhd : t.main, size),
+            t.trackingMode==='count' ? 'stack-count' : isLara(t) || isDeathBlossom(t.file) ? 'wide-timer' : t.whole),
           reject: t.reject ? tpl(resizeIcon(t.reject, size)) : null, last: null
         }))
       }));
-      dimensions = '';scanCursor=0;localCursor=0;resetScreenMonitor(); experienceBox = null;
+      dimensions = '';scanCursor=0;resetScreenMonitor(); experienceBox = null; boosterDimensions = '';
       return;
     }
     if (data.generation !== generation) return;
     const t0 = performance.now();
-    if (data.type==='buff-frame') {
-      const frame=prepareFrame(new Uint8ClampedArray(data.buffer),data.w,data.h);
-      frame.timerFormat=data.timerFormat;
-      const timer=vipBoosterRegion(data.sourceWidth,data.sourceHeight);
-      const hud=experienceBuffHud(data.sourceWidth,data.sourceHeight);
-      const origin=data.sourceWidth-data.w;
-      const buffFrame=cropFrame(frame,hud.x-origin,0,data.sourceWidth-hud.x,hud.h).frame;
-      buffFrame.sourceWidth=data.sourceWidth;
-      const expBuffs=readExperienceBuffs(buffFrame,data.t,data.sourceWidth+'x'+data.sourceHeight,false,true);
-      const vipBooster=readVipBooster(cropFrame(frame,timer.x-origin,timer.y,timer.w,timer.h).frame);
-      postMessage({type:'buff-ready',generation,t:data.t,ms:performance.now()-t0,results:[],monitor:{expBuffs,vipBooster}});
-      return;
-    }
     if (data.type!=='frame') return;
+    const installerOnly = data.installerOnly || Boolean(data.targetIds);
     const dims = data.w + 'x' + data.h;
     if (dimensions !== dims) {
-      targets.forEach(t => { t.locked = null; t.misses = 0; t.cursor = 0; t.localSize = 0; t.variants.forEach(v => v.last = null); });
-      if (data.w >= 1800 && data.h >= 1000) {
-        for (const target of targets.filter(isInstaller)) {
-          const index = target.variants.findIndex(variant => variant.main.w === 45);
-          if (index >= 0) target.cursor = target.localSize = index;
-        }
-      }
+      targets.forEach(t => {
+        t.locked = null;
+        t.misses = 0;
+        t.cursor = 0;
+        t.lastScan = 0;
+        t.installerAttempts = 0;
+        t.lastMatchedSize = null;
+        t.variants.forEach(v => v.last = null);
+      });
+      installerSize = null;
       dimensions = dims;resetScreenMonitor(); experienceBox = null;
     }
     const F = prepareFrame(new Uint8ClampedArray(data.buffer), data.w, data.h);
     if (data.externalExperience) {
       const box=data.experienceBox;
-      experienceBox=box?.sourceWidth===F.w && box.sourceHeight===F.h ? box : null;
+      experienceBox=box?.sourceWidth===F.w && box.sourceHeight===(data.contentHeight ?? F.h) ? box : null;
     }
-    const readExp=!data.externalExperience && data.scanExperience!==false;
-    const firstExperience = !data.targetIds && !experienceBox && readExp
-      ? analyzeExperience(F,data.t)
-      : undefined;
-    if (firstExperience?.value) {
+    const readExp=!installerOnly && !data.externalExperience && data.scanExperience!==false;
+    const expFrame = readExp && data.contentHeight > 0 && data.contentHeight < F.h
+      ? {rgba:F.rgba,w:F.w,h:data.contentHeight} : F;
+    const firstExperience = !data.targetIds && readExp ? analyzeExperience(expFrame,data.t) : null;
+    const publishExperienceEarly = firstExperience?.value && !experienceBox;
+    if (publishExperienceEarly) {
       experienceBox=firstExperience.box;
       postMessage({type:'experience-ready',generation,t:data.t,results:[],monitor:{exp:firstExperience}});
     }
@@ -123,216 +176,79 @@ self.onmessage = ({ data }) => {
     const selected = targets.filter(t => (!data.targetIds || data.targetIds.includes(t.id)) &&
       (data.scanRune!==false || !t.id.startsWith('rune_')) &&
       (data.scanFragments!==false || t.id!=='fragments_icon'));
-    const searching = selected.filter(t => t.locked === null);
-    const nearbyTargets = searching.filter(isBuff);
-    const installerTargets = nearbyTargets.filter(isInstaller);
-    // Give installer HUD searches half of the local turns even when other buffs are absent.
-    const localTurn = localCursor++;
-    const pool = installerTargets.length && localTurn % 2 === 0 ? installerTargets : nearbyTargets;
-    const localTarget = pool[Math.floor(localTurn/2) % pool.length];
-    const fullScanTarget = searching[scanCursor++ % searching.length];
-    const anchors = targets.filter(t => isBuff(t) && t.locked !== null && isInstaller(t) === (localTarget && isInstaller(localTarget)))
-      .map(t => t.variants[t.locked].last).filter(Boolean);
-    const left = anchors.length ? Math.max(0, Math.min(...anchors.map(a => a.x)) - 320) : Math.floor(F.w * .65);
-    const top = anchors.length ? Math.max(0, Math.min(...anchors.map(a => a.y)) - 96) : 0;
-    const bottom = anchors.length ? Math.min(F.h, Math.max(...anchors.map(a => a.y)) + 160) : Math.ceil(F.h * .23);
-    const right = anchors.length && localTarget && isInstaller(localTarget)
-      ? Math.min(F.w, Math.max(...anchors.map(a => a.x)) + 320)
-      : F.w;
-    let area = localTarget ? cropFrame(F, left, top, right - left, bottom - top) : null;
-    // Installed skill icons can appear beside the chat panel, below the buff list.
-    if (localTarget && isInstaller(localTarget) && !anchors.length && experienceBox?.y > 0) {
-      const x = experienceBox.x;
-      const y = Math.max(0, experienceBox.y - 180);
-      area = cropFrame(F, x, y, Math.min(F.w - x, Math.ceil(F.w * .55)), experienceBox.y - y);
-    }
-    if (localTarget && isInstaller(localTarget) && (!anchors.length || anchors.every(anchor => anchor.y < F.h*.5)) && F.w >= 1800 && F.h >= 1000) {
-      const x = Math.floor(F.w*.22), y = Math.floor(F.h*.76);
-      area = cropFrame(F,x,y,Math.ceil(F.w*.24),F.h-y);
-    }
-    // Nearby installer slots can shift whenever another buff appears or expires.
-    const hudX = Math.floor(F.w*.16), hudY = Math.floor(F.h*.74);
-    const searchesHud = t => (['janus','fountain'].includes(t.id) || isCaptainBomber(t)) &&
-      (t.locked === null || t.misses > 0 || t.variants[t.locked].last?.y < F.h*.5);
-    const hud = selected.some(searchesHud) ? cropFrame(F,hudX,hudY,Math.ceil(F.w*.38),F.h-hudY) : null;
-    const lara = selected.some(t=>isLara(t) && t.locked===null);
-    const jobBuffX = Math.floor(F.w*.65);
-    const jobBuffHud = searching.some(t=>t.id.startsWith('job-')) ?
-      cropFrame(F,jobBuffX,0,F.w-jobBuffX,Math.ceil(F.h*.21)) : null;
-    const laraInstallerHud = lara && (hud ?? cropFrame(F,hudX,hudY,Math.ceil(F.w*.38),F.h-hudY));
-    const runeX = Math.floor(F.w*.53);
-    const runeHud = selected.some(t => runeTypes.includes(t.id) && t.locked === null)
-      ? cropFrame(F,runeX,0,F.w-runeX,Math.ceil(F.h*.24)) : null;
-    const markerHud = selected.some(t => t.id === 'rune_marker')
-      ? cropFrame(F,0,0,Math.ceil(F.w*.30),Math.ceil(F.h*.40)) : null;
-    const fragmentsX = Math.floor(F.w*.28), fragmentsY = Math.floor(F.h*.63);
-    const fragmentsHud = selected.some(t=>t.id==='fragments_icon' && t.locked===null)
-      ? cropFrame(F,fragmentsX,fragmentsY,Math.ceil(F.w*.44),Math.ceil(F.h*.32)) : null;
-    const results = selected.map(t => {
-      let r;
-      // Reject shortcut-bar candidates, including when following a previous match.
-      const inBuffArea = (x,y,size) => x+size*.5 < F.w*.57 || y+size*.5 < F.h*.86;
-      const variantAt = (variant, region) => t.id.startsWith('job-')
-        ? {...variant,acceptPosition:(x,y,size)=>inBuffArea(x+(region?.x ?? 0),y+(region?.y ?? 0),size)}
-        : variant;
-      if (jobBuffHud && t.id.startsWith('job-') && t.locked===null) {
-        const preferred = F.w>=1800 ? [45,44,32,46,43] : [32,31,33,30,34];
-        const sizes=[preferred[0],preferred[1+t.localSize++%(preferred.length-1)]];
-        for (const region of isLara(t) ? [jobBuffHud,laraInstallerHud] : [jobBuffHud]) {
-          for (const size of new Set(sizes)) {
-            const index=t.variants.findIndex(v=>v.main.w===size);
-            if (index<0) continue;
-            const variant=t.variants[index];
-            const hit=detect(region.frame,{
-              ...variantAt(variant,region),last:null,scanOptions:{coarseMin:.37,maxCands:24}
-            });
-            if (!hit.found || hit.score<variant.thr || hit.color<.84) continue;
-            hit.x+=region.x;
-            hit.y+=region.y;
-            variant.last={x:hit.x,y:hit.y};
-            t.locked=index;
-            t.misses=0;
-            return {id:t.id,...hit};
-          }
-        }
-      }
-      if (fragmentsHud && t.id === 'fragments_icon') {
-        const sizes = F.w >= 1800 ? [34,33,32,35,36,24] : [24,23,25,26,27,28,30,32,34];
-        for (const size of sizes) {
-          const index = t.variants.findIndex(v=>v.main.w===size);
-          if (index<0) continue;
-          const variant=t.variants[index];
-          const hit=detect(fragmentsHud.frame,{...variant,scanOptions:{coarseMin:.44,maxCands:16}});
-          if (!hit.found) continue;
-          hit.x+=fragmentsHud.x;
-          hit.y+=fragmentsHud.y;
-          variant.last={x:hit.x,y:hit.y};
-          t.locked=index;
-          t.misses=0;
-          return {id:t.id,...hit};
-        }
-      }
-      if (markerHud && t.id === 'rune_marker') {
-        const size = t.variants[t.localSize++ % t.variants.length].main.w;
-        const preferred = F.w >= 1800 ? [17,16,18,12,14] : [12,14,16,17];
-        const trackedSize = t.variants[t.locked]?.main.w;
-        const candidates = new Set([trackedSize,...preferred,size]);
-        let best = null;
-        for (const candidate of candidates) {
-          const index = t.variants.findIndex(v=>v.main.w===candidate);
-          if (index<0) continue;
-          const variant=t.variants[index];
-          const hit=detect(markerHud.frame,variant);
-          if (hit.found && (!best || hit.score > best.hit.score)) best = {index,hit};
-        }
-        if (best) {
-          const {index,hit}=best;
-          if (t.locked!==null && t.locked!==index) t.variants[t.locked].last=null;
-          t.variants[index].last={x:hit.x,y:hit.y};
-          t.locked=index;
-          t.misses=0;
-          return {id:t.id,...hit};
-        }
-      }
-      if (runeHud && runeTypes.includes(t.id) && t.locked === null) {
-        const sizes = F.w >= 1800 && F.h >= 1000 ? [45,44,43,46,48,32] : [32,31,33,34,30];
-        for (const size of sizes) {
-          const index = t.variants.findIndex(variant => variant.main.w === size);
-          if (index < 0) continue;
-          const variant = t.variants[index];
-          const hit = detect(runeHud.frame,{
-            ...variant,thr:t.id==='rune_cooldown' ? .83 : variant.thr,
-            scanOptions:{coarseMin:.40,maxCands:24}
-          });
-          if (!hit.found) continue;
-          hit.x += runeHud.x;
-          hit.y += runeHud.y;
+    const searching = selected.filter(target => target.locked === null)
+      .sort((a,b) => a.lastScan - b.lastScan);
+    const fullScanTargets = new Set(searching.slice(0,2));
+    const outsideShortcutBar = (x,y,size) => x+size*.5 < F.w*.57 || y+size*.5 < F.h*.86;
+    const results = selected.map(target => {
+      const variantAt = (variant, region) => ({
+        ...variant, acceptPosition:(x,y,size)=>outsideShortcutBar(x+(region?.x ?? 0),y+(region?.y ?? 0),size)
+      });
+      if (target.locked !== null) {
+        const variant = target.variants[target.locked];
+        const radius = target.misses ? variant.main.w : isInstaller(target) ? 8 : 3;
+        const trackingVariant = isDeathBlossom(target.file) ? {...variant,thr:variant.thr-.04} : variant;
+        const hit = trackInCrop(F,trackingVariant,radius,variantAt);
+        if (hit.found) {
           variant.last = {x:hit.x,y:hit.y};
-          t.locked=index;
-          t.misses=0;
-          return {id:t.id,...hit};
+          target.misses = 0;
+          return {id:target.id,...hit};
         }
+        if (++target.misses < 2) return {id:target.id,...hit};
+        variant.last = null;
+        target.cursor = target.locked;
+        target.locked = null;
+        target.lastScan = 0;
+        target.installerAttempts = 0;
       }
-      if (hud && searchesHud(t)) {
-        const sizes = F.w >= 1800 && F.h >= 1000 ? [45,44,32] : [32,31,33];
-        const trackedSize = t.locked === null ? null : t.variants[t.locked].main.w;
-        for (const size of new Set([trackedSize,...sizes])) {
-          const index = t.variants.findIndex(v => v.main.w === size);
-          if (index < 0) continue;
-          const variant = t.variants[index];
-          const hit = detect(hud.frame,{...variantAt(variant,hud),last:null,scanOptions:{coarseMin:.42,maxCands:24}});
-          if (!hit.found) continue;
-          if (t.locked !== null) t.variants[t.locked].last = null;
-          hit.x += hud.x;
-          hit.y += hud.y;
-          variant.last = {x:hit.x,y:hit.y};
-          t.locked=index;
-          t.misses=0;
-          return {id:t.id,...hit};
-        }
+      if (!fullScanTargets.has(target)) {
+        return {id:target.id,found:false,score:0,mode:'wait'};
       }
-      if (t.locked !== null) {
-        const v = t.variants[t.locked];
-        r = trackInCrop(F,v,isInstaller(t) && t.misses ? 8 : 3,variantAt);
-        if (r.found) { t.misses = 0; v.last = { x: r.x, y: r.y }; return { id: t.id, ...r }; }
-        if (t.id === 'rune_marker') {
-          const marker = detect(markerHud.frame,{...v,last:null});
-          if (marker.found) {
-            v.last={x:marker.x,y:marker.y};
-            t.misses=0;
+      target.lastScan = ++scanCursor;
+      let result = {found:false,score:0,mode:'scan'};
+      const blossom = isDeathBlossom(target.file);
+      const sizeChecks = target.id === 'fragments_icon' ? 3 : 1;
+      for (let attempt=0; attempt<sizeChecks; attempt++) {
+        let index;
+        if (isInstaller(target)) {
+          // Keep checking the usual scale even if the icon was absent when sharing began.
+          const preferredSize = target.lastMatchedSize ?? installerSize ?? target.variants[0].main.w;
+          const preferred = Math.max(0,target.variants.findIndex(variant => variant.main.w === preferredSize));
+          if (target.installerAttempts++ % 2 === 0) {
+            index = preferred;
+          } else {
+            index = target.cursor++ % target.variants.length;
+            if (index === preferred) index = target.cursor++ % target.variants.length;
           }
-          if (marker.found) return {id:t.id,...marker};
+        } else {
+          index = target.cursor++ % target.variants.length;
         }
-        if (++t.misses < (t.id === 'rune_marker' || t.id === 'fragments_icon' || runeTypes.includes(t.id) || isCaptainBomber(t) || isLara(t) ? 1 : 3)) return { id: t.id, ...r };
-        v.last = null;
-        t.cursor = t.locked;
-        t.locked = null;
-      }
-      let index = t.cursor % t.variants.length;
-      if (area && t === localTarget) {
-        index = t.localSize++ % t.variants.length;
-        const variant = t.variants[index];
-        r = detect(area.frame, isInstaller(t)
-          ? { ...variantAt(variant,area), scanOptions: { coarseMin: .42, maxCands: 24 } }
-          : variant);
-        if (!r.found && isInstaller(t) && F.w >= 1800 && area.frame.w <= F.w*.5 &&
-            variant.main.w >= 43 && variant.main.w <= 46) {
-          const neighbor = t.variants.findIndex(v => v.main.w === (variant.main.w === 45 ? 44 : 45));
-          if (neighbor >= 0) {
-            const alternate = detect(area.frame, {...variantAt(t.variants[neighbor],area),scanOptions:{coarseMin:.42,maxCands:24}});
-            if (alternate.found) { index=neighbor; r=alternate; }
-          }
+        const variant = target.variants[index];
+        const hit = detect(F,{
+          ...variantAt(variant),
+          scanOptions: (blossom || target.id === 'fountain') && (index === 0 || variant.main.w === installerSize)
+            ? {coarseMin:.20,maxCands:96} : {coarseMin:.40,maxCands:24},
+          preferResult: blossom ? candidate => {
+            const reading = readBlossomTimer(candidate,F.timerFormat);
+            if (reading.seconds === null || reading.confidence < .87) return false;
+            Object.assign(candidate,reading);
+            return true;
+          } : undefined
+        });
+        if (!hit.found) {
+          if (hit.score > result.score) result = hit;
+          continue;
         }
-        if (r.found) { r.x += area.x; r.y += area.y; }
-      }
-      if (!r?.found && t === fullScanTarget) {
-        index = t.cursor++ % t.variants.length;
-        const variant = t.variants[index];
-        const localResult = r;
-        r = detect(F, isInstaller(t) && variant.main.w <= 24
-          ? { ...variantAt(variant), scanOptions: { coarseMin: .40, maxCands: 24 } }
-          : variantAt(variant));
-        if (!r.found && localResult?.score > r.score) r = localResult;
-      }
-      if (!r) {
-        r = detect(F, t.variants[index], { allowScan: false });
-      }
-      if (t.id === 'rune_marker' && !r.found && markerHud) r.mode = 'scan';
-      const v = t.variants[index];
-      if (r.found) {
-        v.last = { x: r.x, y: r.y };
-        t.locked = index;
-        if (isInstaller(t)) {
-          for (const peer of targets) {
-            if (peer !== t && isInstaller(peer) && peer.locked === null && peer.localSize === 0) {
-              const matchingSize = peer.variants.findIndex(v => v.main.w === r.size);
-              if (matchingSize >= 0) peer.localSize = matchingSize;
-            }
-          }
+        variant.last = {x:hit.x,y:hit.y};
+        target.locked = index;
+        target.misses = 0;
+        if (isInstaller(target)) {
+          target.lastMatchedSize = hit.size;
+          if (!blossom || hit.seconds !== null) installerSize = hit.size;
         }
-        t.misses = 0;
+        return {id:target.id,...hit};
       }
-      return { id: t.id, ...r };
+      return {id:target.id,...result};
     });
     const jobHits=results.filter(r=>r.found && r.id.startsWith('job-'));
     const fileOf=id=>targets.find(target=>target.id===id)?.file;
@@ -350,7 +266,7 @@ self.onmessage = ({ data }) => {
     const bomberAlternates = [];
     for (const result of results) {
       const target = targets.find(item => item.id === result.id);
-      if (!result.found || !target?.file?.includes('배틀쉽_봄버')) continue;
+      if (!result.found || !target || !isBattleship(target)) continue;
       const variant = target.variants[target.locked];
       const size = result.size;
       const x = Math.max(0,result.x-size*3), y = Math.max(0,result.y-size);
@@ -367,10 +283,26 @@ self.onmessage = ({ data }) => {
       if (alternate.found) bomberAlternates.push({id:result.id,...alternate,x:alternate.x+x,y:alternate.y+y});
     }
     for (const result of [...results,...bomberAlternates]) {
-      if (!result.id.startsWith('job-') || !result.found || result.unit==='seconds') continue;
+      if (!result.id.startsWith('job-') || !result.found) continue;
       const target = targets.find(item => item.id === result.id);
       const background = target?.variants[target.locked]?.main.rgba;
       if (!background) continue;
+      if (F.timerFormat==='clock' && (isLara(target) || isBattleship(target))) {
+        Object.assign(result,readInstallerClock(result,background));
+        continue;
+      }
+      if (result.unit==='seconds') continue;
+      if(target.trackingMode==='count') {
+        Object.assign(result,readStackCount(result.preview,result.size,background));
+        continue;
+      }
+      if (isDeathBlossom(target.file)) {
+        const reading = readBlossomTimer(result,F.timerFormat);
+        if (reading.seconds !== null) {
+          Object.assign(result,reading);
+          continue;
+        }
+      }
       // All registered skills use the same countdown OCR. Keep the full
       // width so three digits or a clock can extend past the central strip.
       const wide={area:[.02,.27,1,.77],min:1,aligned:true};
@@ -412,13 +344,7 @@ self.onmessage = ({ data }) => {
         }
         if (result.seconds!==null) continue;
       }
-      const goldArt = target.file?.includes('칼리_데스_블로섬');
-      let reading = goldArt ? readDigits(result.preview,result.size,{
-        area:[.27,.378,.74,.667],min:1,goldTimer:true,aligned:true
-      }) : {seconds:null};
-      if (reading.seconds === null) {
-        reading = readDigits(result.preview,result.size,{area:center,min:1,background,aligned:true});
-      }
+      let reading = readDigits(result.preview,result.size,{area:center,min:1,background,aligned:true});
       if (reading.seconds === null) {
         reading = readDigits(result.preview,result.size,{area:center,min:1,aligned:true});
       }
@@ -486,11 +412,13 @@ self.onmessage = ({ data }) => {
       }
     }
     for (const result of [...results,...bomberAlternates]) {
+      if(result.unit==='count')continue;
       Object.assign(result,applyTimerFormat(result,F.timerFormat));
     }
     for (const alternate of bomberAlternates) {
       const primary = results.find(result => result.id === alternate.id);
-      if (alternate.seconds !== null && (primary.seconds === null || alternate.seconds < primary.seconds)) {
+      if (alternate.seconds !== null && (F.timerFormat!=='clock' || alternate.confidence>=.83) &&
+          (primary.seconds === null || (F.timerFormat==='clock' && primary.confidence<.83) || alternate.seconds < primary.seconds)) {
         Object.assign(primary,alternate);
       }
     }
@@ -499,10 +427,11 @@ self.onmessage = ({ data }) => {
     const grayTarget = selected.find(t=>t.id==='rune_cooldown');
     if (grayTarget) {
       const gray = results.find(r=>r.id==='rune_cooldown');
-      if (runeHud && !gray.found) {
-        const known = detect(runeHud.frame,{main:windowCooldown,thr:.90,scanOptions:{coarseMin:.38,maxCands:24}});
+      if (fullScanTargets.has(grayTarget) && !gray.found) {
+        const known = detect(F,{main:windowCooldown,thr:.90,acceptPosition:outsideShortcutBar,
+          scanOptions:{coarseMin:.38,maxCands:24}});
         if (known.found && known.color>=.90) {
-          Object.assign(gray,known,{x:known.x+runeHud.x,y:known.y+runeHud.y,chroma:{grayTemplate:true}});
+          Object.assign(gray,known,{chroma:{grayTemplate:true}});
         }
       }
       for (const buff of results) {
@@ -554,19 +483,12 @@ self.onmessage = ({ data }) => {
         : seconds;
       Object.assign(r,applyTimerFormat({...fallback,unit:'seconds'},F.timerFormat));
     }
-    const monitor=data.targetIds ? null : analyzeScreen(F,results,data.t,
-      !readExp || firstExperience?.value ? null : firstExperience);
+    const monitor=installerOnly ? null : analyzeScreen(F,results,data.t,publishExperienceEarly ? null : firstExperience);
     if (monitor) {
-      const timer=vipBoosterRegion(F.w,F.h);
       monitor.expBuffs=readExperienceBuffs(F,data.t,dims);
-      monitor.vipBooster=readVipBooster(cropFrame(F,timer.x,timer.y,timer.w,timer.h).frame);
+      monitor.vipBooster=findVipBooster(F);
     }
-    if (monitor?.exp?.value && monitor.exp.box) {
-      if (!experienceBox) {
-        for (const target of targets.filter(isInstaller)) target.localSize = target.cursor % target.variants.length;
-      }
-      experienceBox = monitor.exp.box;
-    }
+    if (monitor?.exp?.value && monitor.exp.box) experienceBox = monitor.exp.box;
     for (const result of results) delete result.preview;
     postMessage({ type: 'result', generation, t: data.t, ms: performance.now() - t0, results, monitor });
   } catch (e) {

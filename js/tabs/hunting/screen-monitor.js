@@ -296,6 +296,100 @@ export function analyzeExperience(F,now) {
   return exp;
 }
 
+function locateFragmentCount(F,icon) {
+  const left=Math.max(0,Math.floor(icon.x-icon.size*.6));
+  const right=Math.min(F.w,Math.ceil(icon.x+icon.size*1.6));
+  const top=Math.max(0,Math.floor(icon.y+icon.size+1));
+  const bottom=Math.min(F.h,Math.ceil(icon.y+icon.size*2.5));
+  const bands=[];let start=null,minX=right,maxX=left;
+  for(let y=top;y<=bottom;y++) {
+    let lit=0;
+    if(y<bottom)for(let x=left;x<right;x++) {
+      const p=(y*F.w+x)*4,r=F.rgba[p],g=F.rgba[p+1],b=F.rgba[p+2];
+      if(r>=100 && g>=105 && b>=150 && b>=g*.93 && b>=r*.95) {
+        lit++;minX=Math.min(minX,x);maxX=Math.max(maxX,x);
+      }
+    }
+    if(lit && start===null)start=y;
+    if(!lit && start!==null) {
+      const h=y-start,w=maxX-minX+1;
+      // A clipped icon glow is not a quantity. Keep the complete text row.
+      if(start>top && y<bottom && h>=5 && h<=Math.max(16,icon.size*.7) && w>=2 && w<=icon.size*2)
+        bands.push({x:minX,y:start,w,h});
+      start=null;minX=right;maxX=left;
+    }
+  }
+  const candidates=[];
+  for(const band of bands) {
+    const votes=new Map();
+    const accept=(reading)=>{
+      if(!/^\d{1,6}$/.test(reading.text) || reading.confidence<.83)return;
+      // Never accept the surviving half of a two-digit quantity as one digit.
+      if(reading.text.length===1 && band.w>band.h*1.35)return;
+      const vote=votes.get(reading.text) ?? {hits:0,reading};
+      vote.hits++;
+      if(reading.confidence>vote.reading.confidence)vote.reading=reading;
+      votes.set(reading.text,vote);
+    };
+    const tones=['fragment','fragment-dim','fragment-soft','fragment-blue'];
+    for(const tone of tones)accept(readScreenText(F,band,tone));
+    if(![...votes.values()].some(v=>v.hits>=2 && v.reading.confidence>=.90)) {
+      // Font size and label position can change independently of the icon.
+      for(const targetHeight of [7,6]) {
+        const scale=band.h/targetHeight,h=targetHeight;
+        const estimate=Math.max(1,Math.round(band.w/scale));
+        for(const w of new Set([estimate,Math.max(1,estimate-1),estimate+1])) {
+        for(const phaseY of [.5,.2,.8,.95])for(const phaseX of [.5,.2,.8,.95]) {
+          const rgba=new Uint8ClampedArray(w*h*4);
+          for(let y=0;y<h;y++)for(let x=0;x<w;x++) {
+            const sx=band.x+Math.min(band.w-1,Math.floor((x+phaseX)*band.w/w));
+            const sy=band.y+Math.min(band.h-1,Math.floor((y+phaseY)*band.h/h));
+            const p=(sy*F.w+sx)*4;
+            rgba.set(F.rgba.subarray(p,p+4),(y*w+x)*4);
+          }
+          for(const tone of tones)accept(readScreenText({w,h,rgba},{x:0,y:0,w,h},tone));
+        }
+        }
+      }
+    }
+    const ranked=[...votes.values()].filter(v=>v.hits>=2)
+      .sort((a,b)=>b.hits-a.hits || b.reading.confidence-a.reading.confidence);
+    if(ranked[0])candidates.push({...ranked[0],box:band});
+  }
+  candidates.sort((a,b)=>b.hits-a.hits || b.reading.confidence-a.reading.confidence);
+  return {located:bands.length>0,box:bands[0],...candidates[0]};
+}
+
+function readScaledFragmentCount(F,icon) {
+  const scale=icon.size/24,w=40,h=12,votes=new Map();
+  for(const phaseY of [.5,.2,.8,.95])for(const phaseX of [.5,.2,.8,.95]) {
+    const rgba=new Uint8ClampedArray(w*h*4);
+    for(let y=0;y<h;y++)for(let x=0;x<w;x++) {
+      const sx=Math.floor(icon.x+(-8+x+phaseX)*scale);
+      const sy=Math.floor(icon.y+(29+y+phaseY)*scale);
+      if(sx<0 || sy<0 || sx>=F.w || sy>=F.h)continue;
+      const p=(sy*F.w+sx)*4;
+      rgba.set(F.rgba.subarray(p,p+4),(y*w+x)*4);
+    }
+    const phaseVotes=new Map();
+    for(const tone of ['fragment','fragment-dim','fragment-soft','fragment-outline']) {
+      const reading=readScreenText({w,h,rgba},{x:0,y:0,w,h},tone);
+      if(!/^\d{1,6}$/.test(reading.text) || reading.confidence<.83)continue;
+      const old=phaseVotes.get(reading.text);
+      if(!old || reading.confidence>old.confidence)phaseVotes.set(reading.text,reading);
+    }
+    for(const reading of phaseVotes.values()) {
+      const vote=votes.get(reading.text) ?? {hits:0,reading};
+      vote.hits++;
+      if(reading.confidence>vote.reading.confidence)vote.reading=reading;
+      votes.set(reading.text,vote);
+    }
+  }
+  const ranked=[...votes.values()].filter(v=>v.hits>=2)
+    .sort((a,b)=>b.hits-a.hits || b.reading.confidence-a.reading.confidence);
+  return ranked[0]?.reading;
+}
+
 export function analyzeScreen(F,results,now,earlyExperience){
   if(now-lastRun<500 && earlyExperience===undefined)return null;
   lastRun=now;
@@ -303,47 +397,24 @@ export function analyzeScreen(F,results,now,earlyExperience){
   const icon=results.find(r=>r.id==='fragments_icon'&&r.found);
   let fragments={value:null,text:'조각 UI 자동 탐색 중'};
   if(icon){
+    fragments={value:null,text:'조각 아이콘 확인 · 숫자 판독 중'};
     const scale=icon.size/24;
     // 조각 아이콘 바로 아래 수량. UI 위치는 아이콘 탐색 결과로 결정.
-    const box={x:icon.x-8*scale,y:icon.y+icon.size+5*scale,w:40*scale,h:10*scale};
-    let reading;
-    // Read the narrow count row before wider crops that can include game effects.
-    {
-      const since=fragmentConfirmed;
-      const candidates=new Map();
-      for (const offset of [1,0,2,-1,3,-2,4]) {
-        const band = {x:icon.x-icon.size*.15,y:icon.y+icon.size*1.29+offset,w:icon.size*1.3,h:Math.max(6,Math.round(icon.size*.24))};
-        for (const tone of ['fragment','fragment-dim','fragment-soft','purple']) {
-          const result = readScreenText(F,band,tone);
-          if (!/^\d{1,6}$/.test(result.text) || result.confidence<.83) continue;
-          const candidate=candidates.get(result.text) ?? {reading:result,tones:new Set()};
-          candidate.tones.add(tone);
-          if(result.confidence>candidate.reading.confidence) candidate.reading=result;
-          candidates.set(result.text,candidate);
-          if(result.confidence>=.98 && candidate.tones.size>=2){reading=result;break;}
-        }
-        if (reading) break;
-      }
-      if(!reading){
-        const score=({reading,tones})=>reading.confidence+Math.min(tones.size-1,2)*.025+
-          (since!==null && Number(reading.text)===since+1 ? .012 : 0);
-        reading=[...candidates.values()].sort((a,b)=>score(b)-score(a))[0]?.reading;
-      }
+    const located=locateFragmentCount(F,icon);
+    const box=located.box;
+    let reading=located.reading;
+    if(located.box && located.box.y>=icon.y+29*scale &&
+        located.box.y+located.box.h<=icon.y+41*scale) {
+      const scaled=readScaledFragmentCount(F,icon);
+      if(scaled && (scaled.text.length>1 || located.box.w<=located.box.h*1.35) &&
+          (!reading || scaled.confidence>=reading.confidence))reading=scaled;
     }
-    for (const [offset, height] of [[0,10],[1,7],[2,7],[3,7],[-1,8],[-3,8],[4,8],[6,8]]) {
-      if (reading) break;
-      const band = {...box,y:box.y+offset*scale,h:height*scale};
-      reading = undefined;
-      for (const tone of ['purple','white','dim']) {
-        const result = readScreenText(F,band,tone);
-        if (/^\d{1,6}$/.test(result.text) && result.confidence>=.83) { reading = result; break; }
-      }
-      if (reading) break;
-    }
+
     if (reading) {
       const count=Number(reading.text);
       const previous=fragmentPending;
-      const recent=previous && now-previous.t<=6500 &&
+      // Successful fragment scans run ten seconds apart.
+      const recent=previous && now-previous.t<=25000 &&
         Math.max(Math.abs(previous.x-icon.x),Math.abs(previous.y-icon.y))<=icon.size/2;
       const equal=recent && previous.value===count;
       const firstIncrease=fragmentConfirmed===null && recent && count===previous.value+1 &&

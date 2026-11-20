@@ -219,8 +219,8 @@
 }
 
 .site-header {
-  --header-height: 48px;
-  --switch-height: 38px;
+  --header-height: 40px;
+  --switch-height: 32px;
   --header-gap: 12px;
   position: relative;
   display: grid;
@@ -238,7 +238,7 @@
 }
 .site-logo {
   position: relative;
-  width: min(100%, 148px);
+  width: min(100%, 123px);
   aspect-ratio: 1016 / 330;
   overflow: hidden;
 }
@@ -635,7 +635,7 @@ body.companion-visible #page { position: relative; z-index: 1; }
   flex: none;
   --switch-gap: 4px;
   --knob-size: calc(var(--switch-height) - 2px - 2 * var(--switch-gap));
-  width: 74px;
+  width: 62px;
   padding: 0 var(--switch-gap);
   height: var(--switch-height);
   box-sizing: border-box;
@@ -657,7 +657,7 @@ body.companion-visible #page { position: relative; z-index: 1; }
   transition: left 340ms cubic-bezier(.22, 1, .36, 1), background-color 340ms ease;
 }
 #themeToggle[aria-checked="true"] .theme-knob { left: calc(100% - var(--switch-gap) - var(--knob-size)); }
-.theme-symbol { position: relative; text-align: center; font-size: 17px; line-height: 1; }
+.theme-symbol { position: relative; text-align: center; font-size: 14px; line-height: 1; }
 #themeToggle[aria-checked="false"] .theme-symbol:nth-child(2),
 #themeToggle[aria-checked="true"] .theme-symbol:last-child { color: var(--accent); }
 :root[data-palette="6"]:not([data-theme="dark"]) #themeToggle .theme-knob {
@@ -670,8 +670,8 @@ body.companion-visible #page { position: relative; z-index: 1; }
 #themeToggle:focus-visible, #ideaButton:focus-visible, .tab-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 @media (max-width: 540px) {
-  .site-header { --header-height: 40px; --switch-height: 34px; --header-gap: 5px; grid-template-columns: 70px minmax(0, 1fr) auto; }
-  #themeToggle { width: 64px; --switch-gap: 5px; }
+  .site-header { --header-height: 40px; --switch-height: 30px; --header-gap: 5px; grid-template-columns: 70px minmax(0, 1fr) auto; }
+  #themeToggle { width: 58px; --switch-gap: 4px; }
   .tab-btn { padding-inline: 6px; font-size: .6875rem; }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -12,7 +12,6 @@ export const experienceBuffGroups=[
 ];
 
 export const experienceBuffIcon = file => new URL('../../../icon/buff/'+encodeURIComponent(file)+'.png',import.meta.url).href;
-export const experienceBuffHud = (w,h) => ({x:Math.floor(w*.48),h:Math.ceil(h*.18)});
 export const experienceBuffPending = (record,now) => record?.deadline<=now &&
   Number.isFinite(record.pendingSince) && now-record.seenAt<=6500;
 

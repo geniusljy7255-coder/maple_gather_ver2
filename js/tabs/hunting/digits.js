@@ -1,5 +1,6 @@
 import { RUNE_COOLDOWN_GLYPHS, SCREEN_GLYPHS } from '../../data/screen-glyphs.js';
 import { BUILTIN } from '../../data/builtin-icons.js';
+import {TIMER_IMAGE_GLYPHS,COUNT_IMAGE_GLYPHS} from '../../data/number-glyphs.js';
 /* 작은 노란 숫자 전용 판독. 낮은 점수/비슷한 후보는 읽지 않는다. */
 const LARGE_TIMER_GLYPHS = [[5,7,"000000000000000000000000000000000001111111111111111000001100000110000011100001111110000011100000110000011000011111111111111110000000000000000000000000000000000000000000"],[4,8,"000000000000000000000000000000000000000000001110000011100001111000011110000111100011111001101110011111101111111011111111000001100000011000000000000000000000000000000000000000000000000000000000"],[7,8,"000000000000000000000000000000000000000011111111011111110000011100000110000001100000110000001100000110000001100000110000001100000111000000100000000000000000000000000000000000000000000000000000"],[5,7,"000000000000000000000000000000000001111111111111111000001100000111000011100001111111000011100000110000011000011111111111111110000000000000000000000000000000000000000000"],[4,8,"000000000000000000000000000000000000000000001100000011100001111000011110001111100111011001101110011011101111111111111111000011100000011000000110000000000000000000000000000000000000000000000000"],[8,8,"000000000000000000000000000000000000000001111110111111111100001111000011110000111110111101111110111001111100001111000011111001111111111101111110000000000000000000000000000000000000000000000000"],[6,8,"000000000000000000000000000000000000000000111111011111111100000011000000110000001100000011111110111001111100001111000011110001111111111101111110000000000000000000000000000000000000000000000000"],[9,8,"000000000000000000000000000000000000000001111110111111111100001111000011110000111100001101111111000111110000001100000011000001110111111001111110000000000000000000000000000000000000000000000000"],[3,7,"000000000000000000000000000000000001111110111111100000110000011000011100001110111111000011100000110000011000011111111111111110000000000000000000000000000000000000000000"],[8,8,"000000000000000000000000000000000000000001111110111111111100001111000011111000111111011101111110111101111110001111000011111000111111111101111110000000000000000000000000000000000000000000000000"],[5,7,"000000000000000000000000000000000001111111111111111000001100000110000011100001111111000011100000110000011000011111111111111110000000000000000000000000000000000000000000"],[9,8,"000000000000000000000000000000000000000001111110111111111100001111000011110000111100001101111111000111110000001100000011000001110111111001111100000000000000000000000000000000000000000000000000"]];
 const GOLD_GLYPHS = [[3,6,"111110111111000011000011000011000111111111000011000011000011000011111111111110"],[1,3,"111111111111111111011011011011111011011"],[3,7,"1111110111111100000110000011000011100001111111111000011100000110000011000011111111111111110"],[0,8,"01111110111111111100001111000011110000111100001111000011110000111100001111000011111001111111111101111110"],[2,7,"1111111111111100000010000001000000100000110000111000111000011000011000111100011111111111111"],[9,8,"01111110111111111100001111000011110000111100001111111111000111110000001100000011000001111111111011111110"],[2,7,"1111111111111100000010000001000000100000110000111000111000011000011000111100011111111111111"],[7,7,"1111111111111100000110000110000011000011100001100001110000110000011000011000011100001110000"],[2,7,"1111111111111100000110000001000000100000110000111000111000011000011000111100011111111111111"],[5,7,"1111111111111111100001110000111000011100001111111000011100000110000011000011111111111111110"],[2,7,"1111111111111100000010000001000000100000110000111000111000011000011000111100011111111111111"],[3,7,"1111110111111100001110000111000011100001111111110000011100001110000011000011111111111111100"],[2,7,"1111111111111100000010000001000000100000110000111000111000011000011000111100011111111111111"],[2,7,"1111110111111100000110000011000001100000110000111000111000011000111000111100011111111111111"],[2,7,"1111111111111100000010000001000000100000110000111000111000011000011000111100011111111111111"],[0,8,"01111110111111111100001111000011110000111100001111000011110000111100001111000011111001111111111101111110"]];
@@ -82,7 +83,56 @@ export function applyTimerFormat(reading,format) {
 }
 
 let runeCooldownTemplates,minuteLabelTemplates,buffSecondsTemplates;
+const imageTemplateCache=new Map();
+export function getImageNumberTemplates(kind='timer',height=0) {
+  const key=kind+':'+height;
+  if(imageTemplateCache.has(key))return imageTemplateCache.get(key);
+  const templates=[],exact=new Map();
+  for(const g of kind==='count'?COUNT_IMAGE_GLYPHS:TIMER_IMAGE_GLYPHS){
+    const shapes=g.shapes.filter(([,h])=>kind==='count' || !height || h===height);
+    if(!shapes.length)continue;
+    const bits=Uint8Array.from(g.bits,Number);
+    for(const [w,h] of shapes){
+      const template={digit:g.digit,bits,aspect:w/h};templates.push(template);
+      const matches=exact.get(g.bits)??[];matches.push(template);exact.set(g.bits,matches);
+    }
+  }
+  templates.exact=exact;imageTemplateCache.set(key,templates);return templates;
+}
 export function readDigits(rgba,size,options={}) {
+  const primary=readDigitPass(rgba,size,options);
+  if(primary.imageFont || options.light || options.dark || options.goldTimer)return primary;
+  for(const timerThreshold of [115,96,175]){
+    const reading=readDigitPass(rgba,size,{...options,timerThreshold});
+    if(reading.seconds!==null && reading.imageFont)return reading;
+  }
+  if(size>32){
+    const votes=new Map();
+    for(const phaseY of [.5,.2,.8,.95])for(const phaseX of [.5,.2,.8,.95]){
+      const sample=new Uint8ClampedArray(32*32*4),background=options.background && new Uint8ClampedArray(sample.length);
+      for(let y=0;y<32;y++)for(let x=0;x<32;x++){
+        const sx=Math.min(size-1,Math.floor((x+phaseX)*size/32)),sy=Math.min(size-1,Math.floor((y+phaseY)*size/32));
+        const p=(sy*size+sx)*4,q=(y*32+x)*4;
+        sample.set(rgba.subarray(p,p+4),q);
+        if(background)background.set(options.background.subarray(p,p+4),q);
+      }
+      const phaseReads=new Map();
+      for(const timerThreshold of [140,115,96,175]){
+        const read=readDigitPass(sample,32,{...options,background,timerThreshold});
+        if(read.seconds!==null && read.imageFont && read.confidence>=.95)phaseReads.set(read.seconds,read);
+      }
+      for(const read of phaseReads.values()){
+        const vote=votes.get(read.seconds)??{hits:0,reading:read};vote.hits++;votes.set(read.seconds,vote);
+      }
+    }
+    const ranked=[...votes.values()].sort((a,b)=>b.hits-a.hits);
+    if(ranked[0] && (ranked.length===1 || ranked[0].hits>=ranked[1].hits+2))return ranked[0].reading;
+  }
+  if(size<28 && options.buffSeconds && !primary.imageFont)
+    return {seconds:null,confidence:0,digit:'uncertain'};
+  return primary;
+}
+function readDigitPass(rgba,size,options) {
   const mask=new Uint8Array(size*size);
   const area=options.area||[.125,.1875,.875,.8125];
   const [x0,y0,x1,y1]=area.map(v=>Math.floor(v*size));
@@ -91,14 +141,14 @@ export function readDigits(rgba,size,options={}) {
     const p=(y*size+x)*4,r=rgba[p],g=rgba[p+1],b=rgba[p+2];
     const yellow = options.faintYellow
       ? r>125 && g>100 && Math.min(r,g)-b>45 && g>r*.60
-      : r>140 && g>115 && Math.min(r,g)-b>65 && g>r*.60;
+      : r>(options.timerThreshold??140) && g>(options.timerThreshold??140)*.82 && Math.min(r,g)-b>65 && g>r*.60;
     const selected = options.dark
       ? Math.max(r,g,b)<105 && Math.max(r,g,b)-Math.min(r,g,b)<50
       : options.light
         ? Math.min(r,g,b)>(options.lightThreshold ?? 150) && Math.max(r,g,b)-Math.min(r,g,b)<100
-        : options.goldTimer ? yellow && g >= r*.87 : yellow;
+        : options.goldTimer ? yellow && g >= r*(options.goldRatio ?? .87) : yellow;
     if (!selected) continue;
-    if (options.outlinedLight) {
+    if (options.outlinedLight || options.outlinedGold) {
       let outline=false;
       for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
         if(x+dx<0 || x+dx>=size || y+dy<0 || y+dy>=size)continue;
@@ -160,7 +210,7 @@ export function readDigits(rgba,size,options={}) {
     ? runs.length>=4 && colonRight-colonLeft<=Math.ceil(size*.10) && colonGroups===2
     : runs.length===4;
   if((options.clockOnly || runs.length===5) && !clockLayout) return unknown;
-  let text='', confidence=1, firstBounds;
+  let text='', confidence=1, firstBounds,allNative=true;
   for(const [index,[left,right]] of runs.entries()) {
     const w=right-left,bits=new Uint8Array(w*size);
     let top=size,bottom=-1;
@@ -211,7 +261,23 @@ export function readDigits(rgba,size,options={}) {
       const score=2*intersection/Math.max(1,total)-Math.abs(glyph.aspect-t.aspect)*.12;
       scores[t.digit]=Math.max(scores[t.digit],score);
     }
-    if (size >= 40 && Math.max(...scores) < .83) {
+    let nativeExact=false;
+    if(options.stackCount || options.minuteLabel || !options.light && !options.dark) {
+      const nativeScores=Array(10).fill(0);
+      const references=getImageNumberTemplates(options.stackCount || options.minuteLabel ? 'count' : 'timer',bottom-top+1);
+      const matches=references.exact.get(glyph.bits.join(''))?.filter(t=>Math.abs(t.aspect-glyph.aspect)<.2);
+      const precise=matches && new Set(matches.map(t=>t.digit)).size===1;
+      for(const t of precise ? matches : references) {
+        let intersection=0,total=0;
+        for(let i=0;i<120;i++){intersection+=glyph.bits[i]&t.bits[i];total+=glyph.bits[i]+t.bits[i];}
+        nativeScores[t.digit]=Math.max(nativeScores[t.digit],2*intersection/Math.max(1,total)-Math.abs(glyph.aspect-t.aspect)*.12);
+      }
+      const order=[...nativeScores].sort((a,b)=>b-a);
+      nativeExact=order[0]>=.96 && order[0]-order[1]>=.055;
+      for(let digit=0;digit<10;digit++)scores[digit]=nativeExact ? nativeScores[digit] : Math.max(scores[digit],nativeScores[digit]);
+    }
+    allNative &&= nativeExact;
+    if (!nativeExact && size >= 40 && Math.max(...scores) < .83) {
       const fallback = clockLayout
         ? (largeTemplates ??= LARGE_TIMER_GLYPHS.map(([digit,width,bits])=>({
             digit,...normalize(Uint8Array.from(bits,Number),width,24)
@@ -223,7 +289,7 @@ export function readDigits(rgba,size,options={}) {
         scores[t.digit]=Math.max(scores[t.digit],2*intersection/Math.max(1,total)-Math.abs(glyph.aspect-t.aspect)*.12);
       }
     }
-    if(options.minuteLabel || options.buffSeconds) {
+    if(!nativeExact && (options.minuteLabel || options.buffSeconds)) {
       const middle=Array.from({length:4},(_,x)=>glyph.bits[5*10+x+3]+glyph.bits[6*10+x+3]).reduce((a,b)=>a+b,0);
       const leftStroke=(start,end)=>{
         let count=0;
@@ -246,9 +312,9 @@ export function readDigits(rgba,size,options={}) {
   if (text.includes(':')) {
     const clock=text.match(options.longTimer ? /^([1-9]\d?):([0-5]\d)$/ : /^([1-9]):([0-5]\d)$/);
     if (!clock) return unknown;
-    return {seconds:Number(clock[1])*60+Number(clock[2]),confidence,digit:'visible',unit:'seconds',clock:true};
+    return {seconds:Number(clock[1])*60+Number(clock[2]),confidence,digit:'visible',unit:'seconds',clock:true,...(allNative?{imageFont:true}:{})};
   }
   const seconds=Number(text);
   if((text.length>1 && text[0]==='0') || seconds<(options.min??6) || seconds>(options.longTimer?9999:999)) return unknown;
-  return {seconds,confidence,digit:'visible'};
+  return {seconds,confidence,digit:'visible',...(allNative?{imageFont:true}:{})};
 }

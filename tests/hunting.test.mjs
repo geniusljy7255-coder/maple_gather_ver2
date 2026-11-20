@@ -189,6 +189,36 @@ test('window EXP worker reads a cropped first frame after each share reconnect',
   globalThis.postMessage=previousPost;
  }
 });
+test('window EXP results reach the same callback as installer and monitor results',async()=>{
+ const previousWorker=globalThis.Worker;
+ const workers=[],received=[];
+ globalThis.Worker=class {
+  constructor(){workers.push(this);}
+  postMessage(message){this.request=message;}
+ };
+ try {
+  const detector=await import('../js/tabs/hunting/detector.js?worker-results-test');
+  const receive=message=>received.push(message);
+  detector.startDetector(receive);
+  detector.startExperienceDetector(receive);
+  detector.configure([{id:'janus'}],[{id:'rune_marker'}],[],1);
+  const [installers,monitor,experience]=workers;
+  const generation=monitor.request.generation;
+  const frame=()=>({width:1,height:1,data:new Uint8ClampedArray(4)});
+  assert.ok(detector.analyzeMonitor(frame(),1000,true,true,true,false));
+  assert.ok(detector.analyzeInstallers(frame(),1000));
+  assert.ok(detector.analyzeExperienceFrame({image:frame(),sourceHeight:1},1000));
+  const exp={value:{raw:'38003778803410'},box:{x:1,y:2}};
+  experience.onmessage({data:{type:'experience-ready',generation:experience.request.generation,
+   results:[],monitor:{exp}}});
+  installers.onmessage({data:{type:'result',generation,results:[{id:'janus',found:true}],monitor:null}});
+  assert.equal(received[0].monitor.exp,exp);
+  assert.equal(received[1].results[0].id,'janus');
+  assert.equal(detector.canAnalyzeMonitor(1001),false);
+ } finally {
+  globalThis.Worker=previousWorker;
+ }
+});
 test('actual minimap rune is found and removing it produces no false rune',()=>{
  const frame=prepareFrame(screenshot.rgba,screenshot.w,screenshot.h);const r=detect(frame,markerTarget());
  assert.equal(r.found,true);
@@ -196,11 +226,29 @@ test('actual minimap rune is found and removing it produces no false rune',()=>{
  for(let y=r.y;y<r.y+r.size;y++)for(let x=r.x;x<r.x+r.size;x++)pixels.set([30,35,40,255],(y*screenshot.w+x)*4);
  assert.equal(detect(prepareFrame(pixels,screenshot.w,screenshot.h),markerTarget()).found,false);
 });
-test('small rune detection works at a moved location and on a different background',()=>{
+test('rune worker finds a marker at a moved location on a different background',async()=>{
  const pixels=new Uint8ClampedArray(320*240*4);for(let p=0;p<pixels.length;p+=4)pixels.set([20,40,60,255],p);
  const icon=MONITOR_REFERENCE.rune_marker;
  for(let y=0;y<12;y++)for(let x=0;x<12;x++){const p=(y*12+x)*4;if(icon.rgba[p+3])pixels.set(icon.rgba.subarray(p,p+4),((y+81)*320+x+203)*4);}
  const r=detect(prepareFrame(pixels,320,240),markerTarget());assert.equal(r.found,true);assert.equal(r.x,203);assert.equal(r.y,81);
+ const previousSelf=globalThis.self,previousPost=globalThis.postMessage;
+ const messages=[];
+ globalThis.self={};globalThis.postMessage=message=>messages.push(message);
+ try {
+  await import('../js/tabs/hunting/detector.worker.js');
+  self.onmessage({data:{type:'config',generation:1,targets:[
+   {id:'rune_marker',main:icon,thr:.85,whole:true,marker:true},
+   {id:'rune_cooldown',main:icon,thr:.88,colorMode:'gray'}
+  ]}});
+  self.onmessage({data:{type:'frame',generation:1,t:1000,w:320,h:240,buffer:pixels.buffer,externalExperience:true}});
+  const message=messages.at(-1);
+  assert.equal(message.type,'result',message.message);
+  const marker=message.results.find(hit=>hit.id==='rune_marker');
+  assert.equal(marker.found,true);
+  assert.deepEqual([marker.x,marker.y],[203,81]);
+ } finally {
+  globalThis.self=previousSelf;globalThis.postMessage=previousPost;
+ }
 });
 test('raw experience increasing starts hunting even while rounded percentage is unchanged',()=>{
  const m=createHuntModel();observeExperience(m,{percent:28.693,raw:'38003778803410'},1000);
@@ -459,7 +507,7 @@ test('experience buff groups keep individual deadlines and replace only confirme
  assert.equal(bonus.deadline,1810000);
  assert.equal(multiplier.deadline,1806500);
 });
-test('experience buff HUD reads two icons with separate visible minute timers',()=>{
+test('experience buffs are found outside the upper-right HUD with separate visible minute timers',()=>{
  const assets=[['bonus','추가_경험치_50%'],['vip','VIP_버프_경험치']].map(([group,file])=>({
   group,file,main:readPNG(new URL('../icon/buff/'+encodeURIComponent(file)+'.png',import.meta.url))
  }));
@@ -468,56 +516,46 @@ test('experience buff HUD reads two icons with separate visible minute timers',(
   const rgba=new Uint8ClampedArray(w*h*4);
   for (const [i,{main}] of assets.entries()) {
    if (i && !withVip) continue;
-   const x=510+i*42;
-   for(let y=0;y<32;y++)rgba.set(main.rgba.subarray(y*128,(y+1)*128),((y+10)*w+x)*4);
+   const x=80+i*42, top=180;
+   for(let y=0;y<32;y++)rgba.set(main.rgba.subarray(y*128,(y+1)*128),((y+top)*w+x)*4);
    if(!withTimer) continue;
-   if(!i) for(let y=33;y<42;y++) for(let col=0;col<32;col++){
+   if(!i) for(let y=top+23;y<top+32;y++) for(let col=0;col<32;col++){
     rgba.set([24,35,52,255],(y*w+x+col)*4);
    }
    const digits=i ? ['11110/00001/00001/01110/00001/00001/11110','01110/10001/10011/10101/11001/10001/01110'] :
      ['01110/10001/00001/00010/00100/01000/11111','01110/10001/10001/01111/00001/00001/01110'];
    for(const [j,glyph] of digits.entries())for(const [y,row] of glyph.split('/').entries()) {
     for(const [col,bit] of [...row].entries()) {
-     rgba.set(bit==='1'?[255,255,255,255]:[30,30,30,255],((y+(i?32:34))*w+x+(i?3:1)+j*6+col)*4);
+     rgba.set(bit==='1'?[255,255,255,255]:[30,30,30,255],((y+top+(i?22:24))*w+x+(i?3:1)+j*6+col)*4);
     }
    }
   }
   return prepareFrame(rgba,w,h);
  };
- const crop=(frame,x,y,width,height)=>{
-  const rgba=new Uint8ClampedArray(width*height*4);
-  for(let row=0;row<height;row++){
-   const from=((y+row)*frame.w+x)*4;
-   rgba.set(frame.rgba.subarray(from,from+width*4),row*width*4);
-  }
-  return {frame:prepareFrame(rgba,width,height)};
- };
  const detector=createExperienceBuffDetector(assets);
  const originalTemplate=makeTemplate(assets[0].main.rgba,32,32,'wide-timer');
- const originalHit=detect(createFrame(false),{main:originalTemplate,thr:.86,minColor:.86,last:{x:510,y:10}},
+ const originalHit=detect(createFrame(false),{main:originalTemplate,thr:.86,minColor:.86,last:{x:80,y:180}},
    {allowScan:false,trackRadius:0});
  assert.equal(originalHit.found,false);
- for(const t of [1000,1500,5000,5500]) scanExperienceBuffs(detector,createFrame(t>=5000),t,crop);
+ for(const t of [1000,1500,5000,5500]) scanExperienceBuffs(detector,createFrame(t>=5000),t);
  assert.equal(detector.records.bonus.deadline,1741500);
  assert.equal(detector.records.vip.deadline,1805500);
  assert.equal(detector.records.bonus.approx,true);
  const untimed=createExperienceBuffDetector(assets);
- for(const t of [1000,4000,7000]) scanExperienceBuffs(untimed,createFrame(true,false),t,crop);
+ for(const t of [1000,4000,7000]) scanExperienceBuffs(untimed,createFrame(true,false),t);
  assert.equal(untimed.records.bonus.seenAt,7000);
  assert.equal(untimed.records.bonus.sample,null);
  assert.ok(Object.values(untimed.records).every(record=>record.deadline===0));
  const quick=createExperienceBuffDetector(assets);
- scanExperienceBuffs(quick,createFrame(false,false),1000,crop);
- const x=Math.floor(w*.48);
- const {frame:region}=crop(createFrame(true),x,0,w-x,Math.ceil(h*.18));
- region.sourceWidth=w;
- scanExperienceBuffs(quick,region,1750,crop,true);
+ scanExperienceBuffs(quick,createFrame(false,false),1000);
+ const region=createFrame(true);
+ scanExperienceBuffs(quick,region,1750,{onlyPending:true});
  assert.equal(quick.records.bonus.sample.seconds,1740);
  assert.equal(quick.records.vip,undefined);
- scanExperienceBuffs(quick,region,2500,crop,true);
+ scanExperienceBuffs(quick,region,2500,{onlyPending:true});
  assert.equal(quick.records.bonus.deadline,1742500);
  const couponOnly=createExperienceBuffDetector([assets[0],{...assets[0],group:'multiplier',file:'multiplier'}]);
- for(const t of [1000,1500]) scanExperienceBuffs(couponOnly,createFrame(false),t,crop);
+ for(const t of [1000,1500]) scanExperienceBuffs(couponOnly,createFrame(false),t);
  assert.ok(couponOnly.records.bonus.deadline>0);
  assert.ok(!(couponOnly.records.multiplier?.deadline>0));
  const ambiguous=createExperienceBuffDetector([
@@ -526,7 +564,7 @@ test('experience buff HUD reads two icons with separate visible minute timers',(
  ]);
  // Only one group is due, but its rival artwork must still be checked at the same slot.
  ambiguous.checked['wealth-potion']=1000;
- for(const t of [1000,1500]) scanExperienceBuffs(ambiguous,createFrame(false),t,crop);
+ for(const t of [1000,1500]) scanExperienceBuffs(ambiguous,createFrame(false),t);
  assert.equal(ambiguous.records['experience-potion']?.deadline,0);
 });
 test('union buffs require different artwork colors despite identical countdowns',()=>{
@@ -550,10 +588,12 @@ test('unused buffs back off to twelve seconds between searches',()=>{
  const icon=readPNG(new URL('../icon/buff/VIP_버프_경험치.png',import.meta.url));
  const detector=createExperienceBuffDetector([{group:'vip',file:'vip',main:icon}]);
  const frame=prepareFrame(new Uint8ClampedArray(192*192*4),192,192);
- let scans=0;
- const crop=()=>{scans++;return {frame};};
- for(const t of [1000,2000,4000,5000,10000,15000,21000,22000]) scanExperienceBuffs(detector,frame,t,crop);
- assert.equal(scans,4);
+ const checks=[];
+ for(const t of [1000,2000,4000,5000,10000,15000,21000,22000]) {
+  scanExperienceBuffs(detector,frame,t);
+  if(detector.checked.vip===t) checks.push(t);
+ }
+ assert.deepEqual(checks,[1000,4000,10000,22000]);
  assert.equal(detector.checked.vip,22000);
  assert.equal(detector.records.vip,undefined);
 });
@@ -638,7 +678,7 @@ test('confirmed cooldown survives an untimed colored candidate and a five-second
  assert.equal(runePresentation(state,6500).seconds,370);
 });
 
-test('countdown OCR converts minute and second notation without changing plain seconds',()=>{
+function drawTimer(rgba,text,faintColon=false) {
  const glyphs={
   '0':['01110','10001','10011','10101','11001','10001','01110'],
   '1':['00100','01100','00100','00100','00100','00100','01110'],
@@ -648,8 +688,7 @@ test('countdown OCR converts minute and second notation without changing plain s
   '9':['01110','10001','10001','01111','00001','00001','01110'],
   ':':['0','0','1','0','1','0','0']
  };
- function read(text,options,faintColon=false) {
-   const size=32,rgba=new Uint8ClampedArray(size*size*4);
+   const size=32;
    let x=5;
    for(const char of text) {
      const glyph=glyphs[char];
@@ -658,7 +697,13 @@ test('countdown OCR converts minute and second notation without changing plain s
      }
      x+=glyph[0].length+1;
    }
-   return readDigits(rgba,size,options);
+}
+
+test('countdown OCR converts minute and second notation without changing plain seconds',()=>{
+ function read(text,options,faintColon=false) {
+   const rgba=new Uint8ClampedArray(32*32*4);
+   drawTimer(rgba,text,faintColon);
+   return readDigits(rgba,32,options);
  }
  assert.equal(read('1:00').seconds,60);
  const missedColon=read('1:05',undefined,true);
@@ -685,8 +730,67 @@ test('countdown OCR converts minute and second notation without changing plain s
  assert.equal(cooldownSeconds(14,null,'minutes').seconds,840);
 });
 
+test('Lara and Battleship read whole minutes and the under-a-minute transition in the worker',async()=>{
+ const previousSelf=globalThis.self,previousPost=globalThis.postMessage;
+ let message;
+ globalThis.self={};
+ globalThis.postMessage=result=>message=result;
+ try {
+  await import('../js/tabs/hunting/detector.worker.js?installer-clock-test');
+  for(const file of ['라라_강줄기_흐르는_곳','캡틴_배틀쉽_봄버_6차']){
+   const main=readPNG(new URL('../icon/hunting/'+file+'.png',import.meta.url));
+   self.onmessage({data:{type:'config',generation:1,targets:[{id:'job-1',file,main,thr:.84,trackingMode:'timer'}]}});
+   for(const [index,[label,seconds]] of [['1:05',65],['1:00',60],['59',59]].entries()){
+    const icon=main.rgba.slice(),w=320,h=240,left=96,top=145;
+    const rgba=new Uint8ClampedArray(w*h*4);
+    for(let y=11;y<21;y++)for(let x=4;x<28;x++)icon.set([10,10,10,255],(y*32+x)*4);
+    drawTimer(icon,label,true);
+    for(let row=0;row<32;row++)rgba.set(icon.subarray(row*128,(row+1)*128),((top+row)*w+left)*4);
+    self.onmessage({data:{type:'frame',generation:1,t:1000+index*500,w,h,buffer:rgba.buffer,
+     installerOnly:true,timerFormat:'clock'}});
+    assert.equal(message.type,'result',message.message);
+    assert.equal(message.results[0].found,true,file);
+    assert.deepEqual([message.results[0].x,message.results[0].y,message.results[0].size],[left,top,32],file);
+    assert.equal(message.results[0].seconds,seconds,file+' '+label);
+   }
+  }
+ } finally {
+  globalThis.self=previousSelf;
+  globalThis.postMessage=previousPost;
+ }
+});
+
 test('experience parser accepts shorter character values next to the percent',()=>{
  assert.equal(parseExperience('7,114,772[0.322%]').raw,'7114772');
  assert.equal(parseExperience('114,772[0.322%]').raw,'114772');
  assert.equal(parseExperience('114,772'),null);
+});
+
+test('fragment OCR reads 4 in single, tens and repeated digit counts',()=>{
+ const glyphs={
+  '4':['0001100','0011100','0101100','1001100','1111111','0001100','0001100'],
+  '2':['1111100','1001100','0000001','0111111','1000000','1000000','1111111'],
+  '3':['1111110','0001000','0000001','0011111','0000001','0000001','1111110']
+ };
+ for(const text of ['4','24','34','42','43','44','444']){
+  const w=text.length*9,h=9,rgba=new Uint8ClampedArray(w*h*4);
+  for(let i=0;i<text.length;i++)for(let y=0;y<7;y++)for(let x=0;x<7;x++){
+   if(glyphs[text[i]][y][x]==='1')rgba.set([190,175,210,255],((y+1)*w+i*9+x)*4);
+  }
+  for(const tone of ['fragment','fragment-dim','fragment-soft'])
+   assert.equal(readScreenText({w,h,rgba},{x:0,y:0,w,h},tone).text,text,text+' '+tone);
+ }
+});
+
+test('fragment confirmation survives ten-second scan intervals',()=>{
+ resetScreenMonitor();
+ const F=prepareFrame(screenshot.rgba,screenshot.w,screenshot.h);
+ const icon=MONITOR_REFERENCE.fragments_icon;
+ const hit=detect(F,{main:makeTemplate(icon.rgba,24,24,true),thr:.86,last:null});
+ const results=[{id:'fragments_icon',...hit}];
+ analyzeScreen(F,results,1000,null);
+ const confirmed=analyzeScreen(F,results,11000,null);
+ assert.equal(confirmed.fragments.value,23);
+ const again=analyzeScreen(F,results,21000,null);
+ assert.equal(again.fragments.value,23);
 });

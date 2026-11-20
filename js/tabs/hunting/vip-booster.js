@@ -1,26 +1,22 @@
 const sevenSegments=['1110111','0010010','1011101','1011011','0111010',
   '1101011','1101111','1010010','1111111','1111011'];
 
-export function vipBoosterRegion(width,height){
-  return {x:Math.floor(width*.475),y:Math.floor(height*.070),
-    w:Math.ceil(width*.083),h:Math.ceil(height*.115)};
-}
-
 // The readout is a four-digit segmented clock with a low decimal point.
 export function readVipBooster({rgba,w,h}){
-  const ink=new Uint8Array(w*h);
-  for(let i=0;i<ink.length;i++){
-    const r=rgba[i*4],g=rgba[i*4+1],b=rgba[i*4+2];
-    // The glossy upper strokes can be nearly white, while the lower strokes are gold.
-    const gold=r>=178 && g>=115 && g>=r*.58 && g-b>=55;
-    const highlight=Math.min(r,g,b)>=211 && Math.max(r,g,b)-Math.min(r,g,b)<=47;
-    ink[i]=gold || highlight;
+  const stride=w+1, sums=new Uint32Array(stride*(h+1));
+  for(let y=0;y<h;y++){
+    let row=0;
+    for(let x=0;x<w;x++){
+      const p=(y*w+x)*4,r=rgba[p],g=rgba[p+1],b=rgba[p+2];
+      // The glossy upper strokes can be nearly white, while the lower strokes are gold.
+      const gold=r>=178 && g>=115 && g>=r*.58 && g-b>=55;
+      const highlight=Math.min(r,g,b)>=211 && Math.max(r,g,b)-Math.min(r,g,b)<=47;
+      row+=Number(gold || highlight);
+      sums[(y+1)*stride+x+1]=row+sums[y*stride+x+1];
+    }
   }
-  const inkIn=(x,y,width,height)=>{
-    let count=0;
-    for(let j=y;j<y+height;j++)for(let i=x;i<x+width;i++)count+=ink[j*w+i];
-    return count;
-  };
+  const inkIn=(x,y,width,height)=>sums[(y+height)*stride+x+width]-sums[(y+height)*stride+x]-
+    sums[y*stride+x+width]+sums[y*stride+x];
   const bands=[];
   let start=-1;
   for(let y=0;y<=h;y++){

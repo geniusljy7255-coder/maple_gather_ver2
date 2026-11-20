@@ -1,6 +1,6 @@
 /* 분석 Worker를 메인 스레드에서 다루는 얇은 래퍼 */
 let generation = 0;
-let worker = null, busy = false, busySince = 0, onResult = null;
+let installerDetector = null, monitorDetector = null;
 let experienceWorker=null,experienceGeneration=0,experienceBusy=false,experienceBox=null;
 
 const TIMER_FORMAT_KEY = 'hunt-timer-format';
@@ -16,30 +16,44 @@ export function setTimerFormat(value) {
 
 export const status = { error: '', frames: 0, ms: 0, lastAt: 0 };
 
-export function startDetector(cb) {
-  if (worker) return;
-  onResult = cb;
+function createDetector(onResult, reportError) {
+  let worker;
   try {
     worker = new Worker(new URL('./detector.worker.js', import.meta.url), { type: 'module' });
-  } catch (e) {
-    status.error = `분석 Worker를 만들지 못했어요: ${e.message}`;
-    return;
+  } catch (error) {
+    if (reportError) status.error = error.message;
+    return null;
   }
+  const detector = {worker, busy:false, busySince:0};
   worker.onmessage = ({ data }) => {
+    if (data.generation !== generation) return;
     if (data.type === 'experience-ready') {
-      if (data.generation === generation) onResult(data);
+      onResult(data);
       return;
     }
-    busy = false;
-    if (data.generation !== generation) return;
-    if (data.type === 'error') { status.error = data.message; return; }
-    status.error = '';
-    status.frames++;
-    status.ms = data.ms;
-    status.lastAt = Date.now();
+    detector.busy = false;
+    if (data.type === 'error') {
+      if (reportError) status.error = data.message;
+      return;
+    }
+    if (reportError) {
+      status.error = '';
+      status.frames++;
+      status.ms = data.ms;
+      status.lastAt = Date.now();
+    }
     onResult(data);
   };
-  worker.onerror = e => { busy = false; status.error = e.message || '분석 Worker 오류 (localhost 같은 서버로 열었는지 확인하세요)'; };
+  worker.onerror = error => {
+    detector.busy = false;
+    if (reportError) status.error = error.message || '설치기 분석 오류';
+  };
+  return detector;
+}
+
+export function startDetector(onResult) {
+  installerDetector ??= createDetector(onResult,true);
+  monitorDetector ??= createDetector(onResult,false);
 }
 
 export function resetExperienceDetector() {
@@ -48,7 +62,7 @@ export function resetExperienceDetector() {
   experienceBox=null;
 }
 
-export function startExperienceDetector() {
+export function startExperienceDetector(onResult) {
   try {
     experienceWorker=new Worker(new URL('./experience.worker.js',import.meta.url),{type:'module'});
   } catch { return; }
@@ -73,27 +87,37 @@ export function analyzeExperienceFrame({image,sourceHeight},t) {
   return true;
 }
 
-/** targets: [{ id, thr, main:{w,h,rgba}, reject?:{w,h,rgba} }] */
-export function configure(targets,experienceBuffAssets=[],captureRevision=0) {
+export function configure(installers, monitorTargets, experienceBuffAssets, captureRevision) {
   generation++;
-  worker?.postMessage({type:'config',generation,targets,experienceBuffAssets,captureRevision});
+  status.lastAt = 0;
+  for (const [detector, targets, assets] of [
+    [installerDetector,installers,[]],
+    [monitorDetector,monitorTargets,experienceBuffAssets]
+  ]) {
+    if (!detector) continue;
+    detector.busy = false;
+    detector.worker.postMessage({type:'config',generation,targets,experienceBuffAssets:assets,captureRevision});
+  }
 }
 
-/** 프레임 한 장을 보낸다. 이전 분석이 끝나지 않았으면 건너뛰고 false를 돌려준다. */
-export function canAnalyze(now = Date.now()) {
-  return Boolean(worker) && (!busy || now - busySince >= 5000);
+function available(detector,now) {
+  return Boolean(detector) && (!detector.busy || now-detector.busySince>=5000);
 }
+export const canAnalyzeInstallers = now => available(installerDetector,now);
+export const canAnalyzeMonitor = now => available(monitorDetector,now);
 
-export function analyze(img, t, targetIds = null, externalExperience = false, scanRune = true, scanFragments = true, scanExperience = true) {
-  return sendFrame(img,t,{type:'frame',targetIds,externalExperience,experienceBox,scanRune,scanFragments,scanExperience});
+export function analyzeInstallers(img,t) {
+  return sendFrame(installerDetector,img,t,{installerOnly:true});
 }
-export function analyzeBuffFrame({image,sourceWidth,sourceHeight},t) {
-  return sendFrame(image,t,{type:'buff-frame',sourceWidth,sourceHeight});
+export function analyzeMonitor(img,t,externalExperience,scanRune,scanFragments,scanExperience) {
+  return sendFrame(monitorDetector,img,t,{externalExperience,experienceBox,scanRune,scanFragments,scanExperience});
 }
-function sendFrame(img,t,fields) {
-  if (!canAnalyze()) return false;
-  busy = true; busySince = Date.now();
-  worker.postMessage({ ...fields,generation,t,timerFormat,
-    w: img.width, h: img.height, buffer: img.data.buffer }, [img.data.buffer]);
+function sendFrame(detector,img,t,fields) {
+  const now=Date.now();
+  if (!available(detector,now)) return false;
+  detector.busy = true;
+  detector.busySince = now;
+  detector.worker.postMessage({...fields,type:'frame',generation,t,timerFormat,
+    w:img.width,h:img.height,contentHeight:img.contentHeight,buffer:img.data.buffer},[img.data.buffer]);
   return true;
 }

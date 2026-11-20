@@ -103,16 +103,15 @@ export function handleMonitor(msg){
     }
     if(count!=null)observeFragments(state.hunt,count);
   }
-  if(msg.type!=='experience-ready' && msg.type!=='buff-ready' && updateRune(state.rune,msg.results,msg.t))notify('룬이 나타났습니다','alert','rune');
+  if(msg.type!=='experience-ready' && updateRune(state.rune,msg.results,msg.t))notify('룬이 나타났습니다','alert','rune');
 }
 const announcedBuffDeadlines=new Map();
 export function captureEnded(){state.hunt.lastExp=null;state.hunt.fragmentBaseline=null;state.hunt.latestFragments=null;state.rune=createRuneState();state.booster={deadline:0,sample:null,confirmedAt:0};state.vision.expBuffs={};state.vision.lastAt=0;state.vision.fragmentsReadAt=0;announcedBuffDeadlines.clear();}
 export function tick(now=Date.now()){
   const booster=state.booster;
   if(booster.deadline && now>=booster.deadline){
-    const confirmedNearEnd=booster.deadline-booster.confirmedAt<=5000;
     state.booster={deadline:0,sample:null,confirmedAt:0};
-    if(confirmedNearEnd){
+    if(booster.confirmedAt){
       notify('부스터 종료','alert','booster');
       companionSay('부스터가 끝났어!');
     }

@@ -1,6 +1,7 @@
-/* 설치기 패널: 자동 감시와 실제 감지 화면 진단 */
+/* 설치기 패널 */
 import { $, setText } from '../../core/dom.js';
 import { getInfo, getGrabError } from './capture.js';
+import { status as detectorStatus } from './detector.js';
 import { TARGETS } from './icons.js';
 import { jobInstallers, jobSkills, jobSkill, jobIconFile, installerIcon, addJobInstaller, updateJobInstaller, removeJobInstaller, onJobInstallersChange } from './job-installers.js';
 import { trackers, jobLoadErrors } from './trackers.js';
@@ -24,12 +25,20 @@ export function installerPresentation(id, now) {
   const tr = trackers[id];
   if (!getInfo().active) return ['화면 공유 필요', 'text-slate-400'];
   if (getGrabError()) return ['화면 프레임 오류', 'text-red-600'];
+  if (detectorStatus.error) return ['설치기 분석 오류', 'text-red-600'];
+  if (!detectorStatus.lastAt || now-detectorStatus.lastAt>5000) return ['분석 프레임 대기', 'text-amber-600'];
   if (!tr) return [jobLoadErrors.has(id) ? '아이콘 로드 실패' : '자동 탐색 대기', 'text-slate-400'];
+  if(tr.trackingMode==='count') {
+    if(tr.count==null || !tr.lastReadAt)
+      return [tr.lastSeen && now-tr.lastSeen<=6500 ? '아이콘 확인 · 개수 확인 중' : '탐색 중','text-amber-600'];
+    if(tr.count===0)return ['0개 · 다시 설치','text-red-600'];
+    return [`남은 개수 · ${tr.count}개`,tr.count<=1 ? 'text-red-600' : 'text-emerald-600'];
+  }
   const seconds = tr.deadline === null ? null : Math.max(0, Math.ceil((tr.deadline - now) / 1000));
   if (tr.state === 'expiring' && seconds > 0) return [`재설치 임박 · ${seconds}초`, 'text-red-600'];
   if (tr.needsReinstall || seconds === 0) return ['다시 설치', 'text-red-600'];
   if (seconds > 0) return [`유지 중 · ${seconds}초`, 'text-emerald-600'];
-  if (id.startsWith('job-') && tr.lastSeen && now - tr.lastSeen <= 6500 && tr.state !== 'expiring') {
+  if (tr.lastSeen && now - tr.lastSeen <= 6500 && tr.state !== 'expiring') {
     return ['아이콘 감지 · 시간 확인 중', 'text-emerald-600'];
   }
   return VIEW[tr.state];

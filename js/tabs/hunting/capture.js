@@ -1,8 +1,7 @@
 /* 화면 공유(getDisplayMedia) 시작/중지와 프레임 수신 */
 import { stats } from './diag.js';
 import { companionSay, notify } from '../../core/notify.js';
-import {experienceBuffHud} from './experience-buffs.js';
-import {vipBoosterRegion} from './vip-booster.js';
+import {gameContentHeight} from './frame-geometry.js';
 
 let stream = null, track = null, video = null, reader = null;
 let latest = null;                    // 가장 최근 프레임 (VideoFrame)
@@ -68,6 +67,10 @@ async function pumpProcessor(t) {
     while (track === t) {
       const { value, done } = await r.read();
       if (done) break;
+      if (track !== t) {
+        value.close();
+        break;
+      }
       latest?.close();
       latest = value;                // 가장 최근 프레임을 보관한다 (이전 것은 닫음)
       stats.proc.push(Date.now());
@@ -76,6 +79,7 @@ async function pumpProcessor(t) {
 }
 
 function cleanup() {
+  geometryCache=null;
   const r = reader;
   latest?.close(); latest = null;
   stream?.getTracks().forEach(t => t.stop());
@@ -89,7 +93,18 @@ export function stopCapture() { if (stream) cleanup(); }
 
 const shot = document.createElement('canvas');
 const experienceShot = document.createElement('canvas');
-const buffShot = document.createElement('canvas');
+const geometryShot = document.createElement('canvas');
+let geometryCache=null;
+function contentHeight() {
+  const w=video.videoWidth,h=video.videoHeight,now=Date.now();
+  if(geometryCache?.w===w && geometryCache.h===h && now-geometryCache.at<1000)return geometryCache.height;
+  geometryShot.width=64;geometryShot.height=h;
+  const ctx=geometryShot.getContext('2d',{willReadFrequently:true});
+  ctx.drawImage(video,0,0,w,h,0,0,64,h);
+  const height=gameContentHeight({w:64,h,rgba:ctx.getImageData(0,0,64,h).data});
+  geometryCache={w,h,height,at:now};
+  return height;
+}
 let shotCtx = null, grabError = '';
 
 /** 마지막으로 화면을 가져오지 못한 이유 (성공하면 빈 문자열) */
@@ -107,26 +122,17 @@ function grabVideoRegion(canvas,x,y,w,h) {
 }
 export function grabExperienceFrame() {
   if (!video || video.readyState<2 || !video.videoWidth || !video.videoHeight) return null;
-  const w=video.videoWidth,sourceHeight=video.videoHeight;
+  const w=video.videoWidth,sourceHeight=contentHeight();
   const h=Math.min(sourceHeight,Math.max(72,Math.ceil(sourceHeight*.10)));
   const image=grabVideoRegion(experienceShot,0,sourceHeight-h,w,h);
   return image ? {image,sourceHeight} : null;
-}
-export function grabBuffFrame() {
-  if (!video || video.readyState<2 || !video.videoWidth || !video.videoHeight) return null;
-  const sourceWidth=video.videoWidth,sourceHeight=video.videoHeight;
-  const hud=experienceBuffHud(sourceWidth,sourceHeight);
-  const timer=vipBoosterRegion(sourceWidth,sourceHeight);
-  const x=Math.min(hud.x,timer.x),h=Math.max(hud.h,timer.y+timer.h);
-  const image=grabVideoRegion(buffShot,x,0,sourceWidth-x,h);
-  return image ? {image,sourceWidth,sourceHeight} : null;
 }
 
 /** 현재 화면 한 장을 ImageData로 가져온다. 실패하면 null이고, 이유는 getGrabError()로 확인한다. */
 export function grabFrame() {
   const tries = [];
+  if (video?.readyState >= 2 && video.videoWidth) tries.push(['영상 요소', video, video.videoWidth, video.videoHeight]);
   if (latest) tries.push(['수신 프레임', latest, latest.displayWidth, latest.displayHeight]);
-  if (video && video.videoWidth) tries.push(['영상 요소', video, video.videoWidth, video.videoHeight]);
   if (!tries.length) {
     grabError = `공유 화면의 프레임이 아직 도착하지 않았어요${pumpError ? ` (수신 오류: ${pumpError})` : ''}`;
     return null;
@@ -140,9 +146,11 @@ export function grabFrame() {
         shotCtx = shot.getContext('2d', { willReadFrequently: true });
       }
       shotCtx.drawImage(src, 0, 0);
-      const img = shotCtx.getImageData(0, 0, w, h);
+      const full = shotCtx.getImageData(0,0,w,h);
+      const height=video?.videoWidth===w && video?.videoHeight===h
+        ? contentHeight() : gameContentHeight({w,h,rgba:full.data});
       grabError = '';
-      return img;
+      return {width:w,height:h,contentHeight:height,data:full.data};
     } catch (e) {
       errs.push(`${name}: ${e?.name || ''} ${e?.message || e}`.trim());
     }
