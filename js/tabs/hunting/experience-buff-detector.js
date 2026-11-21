@@ -304,17 +304,18 @@ function findAsset(region,asset,large,format,neighbors=[],coupons=[]) {
     const minuteSizes=best ? [best.hit.size,first] : [first,asset.main.w,candidates.at(-1)];
     for (const size of new Set(minuteSizes)) {
       const main=templateFor(asset,size);
-      const hit=detect(region,{main:templateFor(asset,size,'minute-timer'),minColor:.91,thr:.91,
+      const mode=asset.group==='boss-strike' ? 'buff-edges' : 'minute-timer';
+      const hit=detect(region,{main:templateFor(asset,size,mode),minColor:.91,thr:.91,
         readTimer:false,acceptPosition,scanOptions:{coarseMin:.46,maxCands:18}});
       if (!hit.found) continue;
       const reading=readTimer(hit,main,format,region);
       const score=hit.score+hit.color;
       if (reading.seconds!==null) {
         if (!best?.reading?.seconds || score>best.hit.score+best.hit.color) {
-          best={hit,main,mode:'minute-timer',reading};
+          best={hit,main,mode,reading};
         }
       } else if (!best || (!best.reading?.seconds && score>best.hit.score+best.hit.color)) {
-        best={hit,main,mode:'minute-timer',reading:{seconds:null,approx:false}};
+        best={hit,main,mode,reading:{seconds:null,approx:false}};
       }
     }
   }
@@ -415,7 +416,7 @@ function identifyBuff(candidate,region,assets) {
   return {...candidate.reading,multiplier:group==='multiplier' ? multiplier : null};
 }
 
-export function scanExperienceBuffs(detector,frame,now,{onlyPending=false,maxGroups=Infinity}={}){
+export function scanExperienceBuffs(detector,frame,now,{onlyPending=false,maxGroups=Infinity,maxInterval=Infinity}={}){
   const {assets,records,checked,misses}=detector;
   if (detector.format!==frame.timerFormat) {
     detector.format=frame.timerFormat;
@@ -443,7 +444,7 @@ export function scanExperienceBuffs(detector,frame,now,{onlyPending=false,maxGro
       ? (record.deadline-now<=12000 ? 450 : record.approx || record.sample?.deadline!==record.deadline ? 5000 : 30000)
       : pending ? (now-record.pendingSince>6500 && !awaitingConfirmation(asset.group) ? 1500 : 450) :
         (often ? 2500 : 3000*2**Math.max(0,(misses[asset.group] ?? 0)-1));
-    return now-(checked[asset.group] ?? -Infinity)>=interval;
+    return now-(checked[asset.group] ?? -Infinity)>=Math.min(interval,maxInterval);
   });
   const priority=group=>now-(checked[group] ?? -Infinity)>=4000 ? 2 : Number(awaitingConfirmation(group));
   const dueGroups=[...new Set(eligible.map(asset=>asset.group))]

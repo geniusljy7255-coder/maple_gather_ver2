@@ -1,4 +1,5 @@
-import { getTimerFormat, setTimerFormat, status as detectorStatus } from './detector.js';
+import { status as detectorStatus } from './detector.js';
+import {bindTimerFormat,timerFormatControl} from './timer-format-control.js';
 import { jobInstallers, jobSkill, jobIconFile, installerIcon, jobAlarm, onJobInstallersChange } from './job-installers.js';
 import {runePresentation} from './rune-state.js';
 import {experienceBuffGroups,experienceBuffIcon,summarizeExperienceBuffs} from './experience-buffs.js';
@@ -119,16 +120,7 @@ export const html = `
 
 <div class="panel">
   <h2 class="panel-h"><span><span class="dot"></span>룬 · 설치기</span><div class="flex flex-wrap items-center justify-end gap-2">
-    <label class="flex items-center gap-1.5 text-xs text-slate-600">
-      <span>인게임 시간 표기</span>
-      <span class="relative">
-        <select id="huntTimerFormat" class="appearance-none rounded-lg border border-slate-300 bg-white py-1.5 pl-2 pr-7 font-bold text-slate-800">
-          <option value="seconds">초</option>
-          <option value="clock">분:초</option>
-        </select>
-        <span class="hunt-select-arrow" aria-hidden="true"></span>
-      </span>
-    </label>
+    ${timerFormatControl('huntTimerFormat')}
     <button id="huntAddInstaller" class="${BTN_GHOST}">설치기 추가하기</button>
   </div></h2>
   <div id="huntInstallerGrid" class="grid gap-3 md:grid-cols-3">
@@ -461,9 +453,7 @@ async function togglePip() {
 }
 
 export function bind() {
-  const timerFormat = $('huntTimerFormat');
-  timerFormat.value = getTimerFormat();
-  timerFormat.addEventListener('change',event=>setTimerFormat(event.target.value));
+  bindTimerFormat($('huntTimerFormat'));
   bindJobInstallers();
   $('huntPipBtn').addEventListener('click', togglePip);
   $('huntShareBtn').addEventListener('click', async () => {

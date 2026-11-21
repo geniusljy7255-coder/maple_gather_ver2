@@ -85,7 +85,7 @@ export function expireInstallers(now) {
     if (now >= tracker.deadline && !tracker.needsReinstall) {
       tracker.needsReinstall = true;
     }
-    const lead=tracker.id.startsWith('job-') ? 0 : 3000;
+    const lead=tracker.id.startsWith('job-') ? 1000 : 4000;
     if (now >= tracker.deadline - lead && !tracker.alerted) {
       tracker.alerted = true;
       notifyInstaller(tracker.id);

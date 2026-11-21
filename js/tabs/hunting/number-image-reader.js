@@ -99,7 +99,7 @@ export function readMinuteImage(rgba,size) {
   return {minutes:native?.[0] ?? null,ambiguous:false};
 }
 
-export function readCountWord(rgba,size){
+export function readCountWord(rgba,size,{singleCorner=false}={}){
   if(size!==32)return null;
   const luminance=new Float32Array(size*size);
   for(let i=0;i<luminance.length;i++){
@@ -108,8 +108,10 @@ export function readCountWord(rgba,size){
   }
   const candidates=[];
   for(const {count,w,h,mask} of COUNT_WORD_MASKS){
+    if(singleCorner && count>9)continue;
     let best=null;
-    for(let bottom=29;bottom<=32;bottom++)for(let right=27;right<=32;right++){
+    for(let bottom=singleCorner ? 25 : 29;bottom<=32;bottom++)
+      for(let right=singleCorner ? 25 : 27;right<=32;right++){
       let matchedShadow=0,misses=0,shadow=0,ink=0,shadowSum=0,inkSum=0;
       for(let y=0;y<h;y++)for(let x=0;x<w;x++){
         const expected=mask[y*w+x];
@@ -124,15 +126,16 @@ export function readCountWord(rgba,size){
           if(light<90)misses++;
         }
       }
-      if(inkSum/ink-shadowSum/shadow<85)continue;
-      const score=matchedShadow-2*misses;
+      const contrast=inkSum/ink-shadowSum/shadow;
+      if(contrast<(singleCorner ? 60 : 85))continue;
+      const score=singleCorner ? 30*(1-misses/(shadow+ink))+contrast/40 : matchedShadow-2*misses;
       if(!best || score>best.score)best={count,score,misses,total:shadow+ink};
     }
     if(best)candidates.push(best);
   }
   candidates.sort((a,b)=>b.score-a.score);
   const [best,next]=candidates;
-  if(!best || best.misses>best.total*.04 || best.score-(next?.score??0)<3)return null;
+  if(!best || best.misses>best.total*(singleCorner ? .10 : .04) || best.score-(next?.score??0)<(singleCorner ? 1.5 : 3))return null;
   return {count:best.count,confidence:1-best.misses/best.total,unit:'count',seconds:null,digit:'visible'};
 }
 

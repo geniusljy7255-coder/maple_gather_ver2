@@ -2,6 +2,7 @@
 import { onTick } from '../../core/clock.js';
 import { html, bind, render, isPipOpen } from './ui.js';
 import { tick } from './session.js';
+import { getInfo } from './capture.js';
 import { initTracking } from './trackers.js';
 
 let visible = false;
@@ -11,7 +12,7 @@ function mount() {
   initTracking().catch(console.error);
   // 타이머 로직은 탭이 숨겨져 있어도 계속 돌고, 화면 갱신은 보일 때만 한다
   onTick(now => {
-    tick(now);
+    if (getInfo().active) tick(now);
     if (visible || isPipOpen()) render(now);
   });
 }

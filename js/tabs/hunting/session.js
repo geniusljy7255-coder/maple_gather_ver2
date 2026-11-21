@@ -105,21 +105,27 @@ export function handleMonitor(msg){
   if(msg.type!=='experience-ready' && updateRune(state.rune,msg.results,msg.t))notify('룬이 나타났습니다','alert','rune');
 }
 const announcedBuffDeadlines=new Map();
+let announcedCollectDeadline=0;
 export function captureEnded(){state.hunt.lastExp=null;state.hunt.fragmentBaseline=null;state.hunt.latestFragments=null;state.rune=createRuneState();state.booster={deadline:0,sample:null,confirmedAt:0};state.vision.expBuffs={};state.vision.lastAt=0;state.vision.fragmentsReadAt=0;announcedBuffDeadlines.clear();}
 export function tick(now=Date.now()){
   const booster=state.booster;
-  if(booster.deadline && now>=booster.deadline){
-    state.booster={deadline:0,sample:null,confirmedAt:0};
-    if(booster.confirmedAt){
-      notify('부스터 종료','alert','booster');
-      companionSay('부스터가 끝났어!');
-    }
+  if(booster.deadline && now>=booster.deadline-1000 && booster.confirmedAt && !booster.alerted){
+    booster.alerted=true;
+    notify('부스터 종료','alert','booster');
+    companionSay('부스터가 끝났어!');
   }
+  if(booster.deadline && now>=booster.deadline) state.booster={deadline:0,sample:null,confirmedAt:0};
   const c=state.collect;
-  if(c.enabled&&state.hunt.running&&c.deadline&&now>=c.deadline){notify('회수하세요','alert','collect');c.deadline+= (Math.floor((now-c.deadline)/(c.sec*1000))+1)*c.sec*1000;}
+  if(c.enabled && state.hunt.running && c.deadline){
+    if(now>=c.deadline-1000 && announcedCollectDeadline!==c.deadline){
+      announcedCollectDeadline=c.deadline;
+      notify('회수하세요','alert','collect');
+    }
+    if(now>=c.deadline)c.deadline+=(Math.floor((now-c.deadline)/(c.sec*1000))+1)*c.sec*1000;
+  }
   let buffExpired=false;
   for(const [id,buff] of Object.entries(state.vision.expBuffs ?? {})){
-    if(!buff.deadline || buff.deadline>now || announcedBuffDeadlines.get(id)===buff.deadline)continue;
+    if(!buff.deadline || buff.deadline-1000>now || announcedBuffDeadlines.get(id)===buff.deadline)continue;
     announcedBuffDeadlines.set(id,buff.deadline);
     buffExpired=true;
   }

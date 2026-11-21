@@ -2,12 +2,13 @@
 import craft from './tabs/craft.js';
 import scheduler from './tabs/scheduler.js';
 import hunting from './tabs/hunting/index.js';
+import boss from './tabs/boss.js';
 import { mountCharacterCompanion } from './character-companion.js';
 import { companionSay } from './core/notify.js';
 
 // 새 탭은 파일을 만든 뒤 여기에 한 줄만 추가하면 됩니다.
 // 탭 정의: { id, title, className?, html, mount?(section), onShow?(), onHide?() }
-const TABS = [craft, hunting, scheduler];
+const TABS = [craft, hunting, boss, scheduler];
 
 const themeToggle = document.getElementById('themeToggle');
 const root = document.documentElement;

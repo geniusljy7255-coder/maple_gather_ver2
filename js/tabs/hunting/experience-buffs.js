@@ -57,14 +57,14 @@ export function observeExperienceBuff(previous,hit,now){
   if (!hit) return record;
   const pendingSince=record.pendingSince!=null && now-record.seenAt<=6500 ? record.pendingSince : now;
   const {seconds,approx,multiplier}=hit;
-  if (!seconds) return {...record,seenAt:now,pendingSince:record.deadline>now ? null : pendingSince};
+  if (!seconds) return {...record,seenFile:hit.file,seenAt:now,pendingSince:record.deadline>now ? null : pendingSince};
   const sample={...hit,at:now,deadline:now+seconds*1000};
   const last=record.sample;
   if (record.deadline>now && record.file===hit.file) {
     const consistent=approx
       ? record.approx && Math.abs(record.deadline-sample.deadline)<=65000
       : Math.abs(record.deadline-sample.deadline)<=(record.approx?65000:2000);
-    if (consistent) return {...record,seenAt:now,readAt:now,sample,
+    if (consistent) return {...record,seenFile:hit.file,seenAt:now,readAt:now,sample,
       multiplier:multiplier && last?.multiplier===multiplier ? multiplier : record.multiplier,
       deadline:record.approx&&!approx ? sample.deadline : record.deadline,
       approx:record.approx&&approx};
@@ -72,7 +72,7 @@ export function observeExperienceBuff(previous,hit,now){
   const confirmed=last && last.file===hit.file && now-last.at<=8500 && last.approx===approx &&
     (!multiplier || previous?.deadline>now || last.multiplier===multiplier) &&
     (approx ? last.seconds===seconds : Math.abs(last.deadline-sample.deadline)<=1500);
-  if (!confirmed) return {...record,sample,seenAt:now,pendingSince:record.deadline>now ? null : pendingSince};
-  return {file:hit.file,deadline:sample.deadline,approx,readAt:now,seenAt:now,sample,
+  if (!confirmed) return {...record,sample,seenFile:hit.file,seenAt:now,pendingSince:record.deadline>now ? null : pendingSince};
+  return {file:hit.file,deadline:sample.deadline,approx,readAt:now,seenFile:hit.file,seenAt:now,sample,
     multiplier:multiplier && last.multiplier===multiplier ? multiplier : null};
 }

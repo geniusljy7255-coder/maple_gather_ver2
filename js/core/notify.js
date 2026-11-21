@@ -1,14 +1,21 @@
 /* 알림: 효과음 + (선택) 음성 */
-const VOICE_KEY = 'hunt_voice';
 export const ALARM_CHANNELS=[{id:'collect',label:'아이템 회수'},{id:'rune',label:'룬 출현'},{id:'janus',label:'솔 야누스'},{id:'fountain',label:'에르다 파운틴'},{id:'booster',label:'VIP 부스터'}];
+export const BOSS_ALARM_CHANNELS=[
+  {id:'boss-burst',label:'극딜'},{id:'boss-semi',label:'준극딜'},
+  {id:'boss-strike',label:'일격필살'},{id:'boss-utility',label:'생존기·유틸기'},
+  {id:'boss-karing',label:'패턴 도우미 - 카링'}
+];
+const alarmScope = id => id.startsWith('boss-') ? 'boss' : 'hunt';
+const alarmKey = id => alarmScope(id)==='boss' ? 'boss_alarm_'+id.slice(5) : 'hunt_alarm_'+id;
 const alarmMemory=new Map();
 export function isAlarmEnabled(id){
   if(alarmMemory.has(id))return alarmMemory.get(id);
-  try{return localStorage.getItem('hunt_alarm_'+id)!=='0';}catch{return true;}
+  try{return localStorage.getItem(alarmKey(id))!=='0';}catch{return true;}
 }
 export function setAlarmEnabled(id,on){
-  if(!ALARM_CHANNELS.some(c=>c.id===id) && !/^job-\d+:[\p{L}\p{N}_]+$/u.test(id))return;
-  alarmMemory.set(id,!!on);try{localStorage.setItem('hunt_alarm_'+id,on?'1':'0');}catch{}
+  if(!ALARM_CHANNELS.some(c=>c.id===id) && !BOSS_ALARM_CHANNELS.some(c=>c.id===id) &&
+      !/^job-\d+:[\p{L}\p{N}_]+$/u.test(id))return;
+  alarmMemory.set(id,!!on);try{localStorage.setItem(alarmKey(id),on?'1':'0');}catch{}
 }
 
 const PATTERNS = { info: [880], alert: [1175, 1175, 1175] };
@@ -17,15 +24,14 @@ const voiceStartListeners = new Set();
 const companionListeners = new Set();
 let ctx = null;
 
-export const getVoice = () => localStorage.getItem(VOICE_KEY) !== '0';
-export const setVoice = on => localStorage.setItem(VOICE_KEY, on ? '1' : '0');
-const VOICE_VOLUME_KEY = 'hunt_voice_volume';
-export function getVoiceVolume() {
-  const saved = localStorage.getItem(VOICE_VOLUME_KEY);
+export const getVoice = (scope='hunt') => localStorage.getItem(`${scope}_voice`) !== '0';
+export const setVoice = (on,scope='hunt') => localStorage.setItem(`${scope}_voice`, on ? '1' : '0');
+export function getVoiceVolume(scope='hunt') {
+  const saved = localStorage.getItem(`${scope}_voice_volume`);
   return saved === null ? 100 : Math.max(0, Math.min(100, Number(saved) || 0));
 }
-export function setVoiceVolume(value) {
-  localStorage.setItem(VOICE_VOLUME_KEY, String(Math.max(0, Math.min(100, Number(value) || 0))));
+export function setVoiceVolume(value,scope='hunt') {
+  localStorage.setItem(`${scope}_voice_volume`, String(Math.max(0, Math.min(100, Number(value) || 0))));
 }
 export const onNotify = fn => subs.add(fn);
 export const onVoiceStart = fn => voiceStartListeners.add(fn);
@@ -53,29 +59,44 @@ function beep(freq, at, dur = 0.18) {
 
 const voiceQueue = [];
 let speaking = false;
+let speechScope = null, stopSpeech = null;
+
+export function cancelVoiceScope(scope) {
+  for(let index=voiceQueue.length-1;index>=0;index--) {
+    if(alarmScope(voiceQueue[index].channel)===scope) voiceQueue.splice(index,1);
+  }
+  if(speechScope===scope) stopSpeech?.();
+}
 
 function playNextVoice() {
   if (speaking) return;
   while (voiceQueue.length) {
     const {text, channel} = voiceQueue.shift();
-    if (!getVoice() || !isAlarmEnabled(channel)) continue;
+    const scope=alarmScope(channel);
+    if (!getVoice(scope) || !isAlarmEnabled(channel)) continue;
     speaking = true;
+    speechScope = scope;
     let done = false;
     const finish = () => {
       if (done) return;
       done = true;
       clearTimeout(timeout);
       speaking = false;
+      speechScope = null;
+      stopSpeech = null;
       playNextVoice();
     };
     const timeout = setTimeout(() => {
       if (done) return;
       try { speechSynthesis.cancel(); } finally { finish(); }
     }, 8000);
+    stopSpeech=()=>{
+      try { speechSynthesis.cancel(); } finally { finish(); }
+    };
     try {
       const speech = new SpeechSynthesisUtterance(text);
       speech.lang = 'ko-KR';
-      speech.volume = getVoiceVolume() / 100;
+      speech.volume = getVoiceVolume(scope) / 100;
       speech.onstart = () => voiceStartListeners.forEach(listener=>listener({text,channel}));
       speech.onend = finish;
       speech.onerror = finish;
@@ -95,7 +116,7 @@ export function notify(text, kind = 'info', channel='general') {
     if (audible && ctx) (PATTERNS[kind] || PATTERNS.info).forEach((f, i) => beep(f, ctx.currentTime + i * 0.25));
   } catch (e) { /* 무시 */ }
 
-  if (audible && getVoice() && typeof speechSynthesis !== 'undefined') {
+  if (audible && getVoice(alarmScope(channel)) && typeof speechSynthesis !== 'undefined') {
     if (voiceQueue.length < 12) voiceQueue.push({text, channel});
     playNextVoice();
   }

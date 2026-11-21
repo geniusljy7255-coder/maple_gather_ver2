@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readPNG} from './png-fixture.mjs';
 import {readDigits} from '../js/tabs/hunting/digits.js';
 import {readStackCount} from '../js/tabs/hunting/stack-count.js';
+import {readBossRegion} from '../js/tabs/boss-recognition.js';
 import {prepareFrame,resizeIcon} from '../js/tabs/hunting/matcher.js';
 import {readMinuteImage} from '../js/tabs/hunting/number-image-reader.js';
 import {createExperienceBuffDetector,scanExperienceBuffs} from '../js/tabs/hunting/experience-buff-detector.js';
@@ -27,6 +28,39 @@ function drawText(frame,text,family,right,top,overlap){
 const buffArt=file=>readPNG(new URL('../icon/buff/'+file+'.png',import.meta.url));
 const minuteBuffArt=buffArt('VIP_버프_경험치');
 
+test('boss worker reads a selected cooldown, a doping buff and the strike icon',async()=>{
+ const oldSelf=globalThis.self,oldPost=globalThis.postMessage,messages=[];
+ globalThis.self={};
+ globalThis.postMessage=message=>messages.push(message);
+ try {
+  await import('../js/tabs/boss.worker.js');
+  const assets=[
+   {group:'boss-buff-0',file:'보스_킬링_머신',main:buffArt('보스_킬링_머신')},
+   {group:'boss-strike',file:'일격필살',main:buffArt('일격필살')}
+  ];
+  const unshownDoping={group:'boss-buff-1',file:'길드의_이름으로',main:buffArt('길드의_이름으로')};
+  self.onmessage({data:{type:'assets',assets:[unshownDoping,...assets]}});
+  const w=320,h=240,rgba=new Uint8ClampedArray(w*h*4);
+  for(const [i,{main}] of assets.entries()){
+   const icon={...main,rgba:main.rgba.slice()};
+   drawText(icon,i===0?'19':'55',i===0?'buff_time_3':'buff_time_1',i===0?16:25,i===0?21:9,i===0?1:2);
+   stamp({w,h,rgba},icon,55+i*49,70);
+  }
+  const icon={w:32,h:32,rgba:new Uint8ClampedArray(32*32*4)};
+  drawText(icon,'3:14','buff_time_1',30,9,2);
+  stamp({w,h,rgba},icon,224,154);
+  const skills=[{id:1,type:'burst',region:{x:224/w,y:154/h,width:32/w,height:32/h}}];
+  for(const time of [1000,1500])self.onmessage({data:{w,h,data:rgba,skills,format:'clock',time,revision:1}});
+  assert.deepEqual(messages.filter(m=>m.type==='regions').at(-1).readings,[{id:1,kind:'time',value:194}]);
+  const records=messages.at(-1).buffs;
+  assert.equal(records['boss-buff-0']?.deadline,1141500);
+  assert.equal(records['boss-strike']?.deadline,56500);
+ } finally {
+  globalThis.self=oldSelf;
+  globalThis.postMessage=oldPost;
+ }
+});
+
 test('new framed potion and Extreme Gold icons retain their native slot size',()=>{
  const w=360,h=240;
  const assets=[
@@ -39,9 +73,8 @@ test('new framed potion and Extreme Gold icons retain their native slot size',()
   const rgba=new Uint8ClampedArray(w*h*4);
   for(const [index,{main}] of shown.entries()){
    const icon={...main,rgba:main.rgba.slice()};
-   assert.equal(icon.w,35);
-   if(index===1 && secondsVisible)drawText(icon,'9:54','buff_time_1',31,11,2);
-   else drawText(icon,['19','10','29'][index],'buff_time_3',16,24,1);
+   if(index===1 && secondsVisible)drawText(icon,'9:54','buff_time_1',icon.w-3,Math.floor(icon.h*.30),2);
+   else drawText(icon,['19','10','29'][index],'buff_time_3',16,icon.h-11,1);
    stamp({w,h,rgba},icon,51+index*70,121);
   }
   const frame=prepareFrame(rgba,w,h);
@@ -54,10 +87,10 @@ test('new framed potion and Extreme Gold icons retain their native slot size',()
   const frame=makeFrame(shown,false);
   scanExperienceBuffs(detector,frame,1000);
   const records=scanExperienceBuffs(detector,frame,1500);
-  for(const [index,{group,file}] of shown.entries()){
+  for(const [index,{group,file,main}] of shown.entries()){
    assert.equal(records[group]?.sample?.seconds,[19,10,29][index]*60,group);
    assert.equal(records[group].file,file);
-   assert.equal(detector.assets.find(asset=>asset.file===file).last?.size,35,group);
+   assert.equal(detector.assets.find(asset=>asset.file===file).last?.size,main.w,group);
    assert.equal(records[group].approx,true,group);
    assert.ok(records[group].deadline>1500,group);
   }
@@ -178,6 +211,27 @@ test('actual gradient quantity PNGs are read over both Ren skill backgrounds',()
    assert.equal(r.count,value,`${file} ${value} at ${size}`);
   }
  }
+});
+test('Ascent reads only the lower-right charge counter',()=>{
+ const base=art('렌_매화검_3초식_예인');
+ const skill={name:'어센트',type:'utility',region:{x:0,y:0,width:1,height:1}};
+ for(const value of [0,1,2,3,4]){
+  const icon={...base,rgba:base.rgba.slice()};
+  drawText(icon,String(value),'count',32,21,1);
+  assert.deepEqual(readBossRegion(icon,skill,'seconds'),
+    value<=3 ? {kind:'count',value} : {kind:'unknown'});
+ }
+});
+test('Ascent can read a dim counter inset from the icon border',()=>{
+ const base=art('렌_매화검_3초식_예인');
+ const frame={...base,rgba:base.rgba.slice()};
+ const glyph=load('count_num/count_3.png');
+ for(let i=0;i<glyph.rgba.length;i+=4){
+  for(let c=0;c<3;c++)glyph.rgba[i+c]*=.70;
+ }
+ stamp(frame,glyph,20,15);
+ const skill={name:'어센트',type:'utility',region:{x:0,y:0,width:1,height:1}};
+ assert.deepEqual(readBossRegion(frame,skill,'clock'),{kind:'count',value:3});
 });
 test('complete count sprites remain readable with tinted strokes and shadows',()=>{
  const file='렌_매화검_3초식_예인',base=art(file);

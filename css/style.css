@@ -746,6 +746,15 @@ body.companion-visible #page { position: relative; z-index: 1; }
 .hunt-volume:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; }
 #jobAlarmControls:not(:empty) { margin-top: .5rem; }
 
+.karing-red { color: #b91c1c; }
+.karing-green { color: #166534; }
+.karing-yellow { color: #854d0e; }
+.karing-blue { color: #1d4ed8; }
+[data-theme="dark"] .karing-red { color: #f87171; }
+[data-theme="dark"] .karing-green { color: #4ade80; }
+[data-theme="dark"] .karing-yellow { color: #fde047; }
+[data-theme="dark"] .karing-blue { color: #60a5fa; }
+
 .hunt-exp-buff-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 3fr);

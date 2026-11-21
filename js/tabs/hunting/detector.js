@@ -4,14 +4,19 @@ let installerDetector = null, monitorDetector = null;
 let experienceWorker=null,experienceGeneration=0,experienceBusy=false,experienceBox=null;
 
 const TIMER_FORMAT_KEY = 'hunt-timer-format';
+const timerFormatListeners = new Set();
 let timerFormat = 'seconds';
 try {
   if (localStorage.getItem(TIMER_FORMAT_KEY)==='clock') timerFormat='clock';
 } catch {}
 export const getTimerFormat = () => timerFormat;
+export const onTimerFormatChange = listener => timerFormatListeners.add(listener);
 export function setTimerFormat(value) {
-  timerFormat=value==='clock' ? 'clock' : 'seconds';
+  const format=value==='clock' ? 'clock' : 'seconds';
+  if (format===timerFormat) return;
+  timerFormat=format;
   try { localStorage.setItem(TIMER_FORMAT_KEY,timerFormat); } catch {}
+  timerFormatListeners.forEach(listener=>listener(timerFormat));
 }
 
 export const status = { error: '', lastAt: 0 };

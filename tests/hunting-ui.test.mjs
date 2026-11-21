@@ -9,6 +9,24 @@ test('per-alarm mute suppresses sound and speech without suppressing event logs'
  N.notify('룬','alert','rune');assert.equal(beeps,3);assert.equal(voices,1);
  N.setAlarmEnabled('collect',true);N.notify('회수','alert','collect');assert.equal(beeps,6);assert.equal(voices,2);
 });
+test('boss voice and alarm settings are independent of hunting',()=>{
+ const oldVoice=N.getVoice(),oldVolume=N.getVoiceVolume();
+ const before=voices;
+ N.setVoice(false,'boss');
+ N.setVoiceVolume(35,'boss');
+ N.notify('보스 알림 테스트','alert','boss-test');
+ assert.equal(voices,before);
+ assert.equal(N.getVoice(),oldVoice);
+ assert.equal(N.getVoiceVolume(),oldVolume);
+ assert.equal(N.getVoiceVolume('boss'),35);
+ N.setVoice(true,'boss');
+ N.notify('보스 알림 테스트','alert','boss-test');
+ assert.equal(voices,before+1);
+ N.setAlarmEnabled('boss-burst',false);
+ N.notify('극딜','alert','boss-burst');
+ assert.equal(voices,before+1);
+ N.setAlarmEnabled('boss-burst',true);
+});
 const elements=new Map(),make=()=>({attributes:new Map(),getAttribute(name){return this.attributes.get(name)??null;},setAttribute(name,value){this.attributes.set(name,String(value));},removeAttribute(name){this.attributes.delete(name);},style:{setProperty(key,value){this[key]=value;}},classList:{toggle(){}},handlers:{},children:[],selectors:new Map(),addEventListener(k,fn){this.handlers[k]=fn;},append(...n){this.children.push(...n);},replaceChildren(){this.children=[];},querySelector(key){if(!this.selectors.has(key))this.selectors.set(key,make());return this.selectors.get(key);},remove(){},getContext:()=>({clearRect(){},putImageData(){}})});
 globalThis.document={hidden:false,createElement:make,getElementById:id=>elements.get(id)||null};
 const ui=await import('../js/tabs/hunting/ui.js');const S=await import('../js/tabs/hunting/session.js');
@@ -156,15 +174,15 @@ test('confirmed installer expires and notifies once without further frame result
  const events=[];N.onNotify(e=>events.push(e));
  try {
    N.setAlarmEnabled('janus',true);
-   Object.assign(trackers.janus,{deadline:3000,needsReinstall:false,alerted:false});
+   Object.assign(trackers.janus,{deadline:4000,needsReinstall:false,alerted:false});
    expireInstallers(-1);
    assert.equal(events.filter(e=>e.channel==='janus').length,0);
    expireInstallers(0);
    assert.equal(events.filter(e=>e.channel==='janus').length,1);
    assert.equal(trackers.janus.needsReinstall,false);
-   expireInstallers(2999);
-   expireInstallers(3000);
-   expireInstallers(3500);
+   expireInstallers(3999);
+   expireInstallers(4000);
+   expireInstallers(4500);
    assert.equal(trackers.janus.needsReinstall,true);
    assert.equal(events.filter(e=>e.channel==='janus').length,1);
  } finally {Object.assign(trackers.janus,previous);}
@@ -187,9 +205,9 @@ test('two Captain installer alerts are added, muted and removed independently',a
    assert.equal(N.isAlarmEnabled(jobAlarm(first).id),true);
    const expiry=10000;
    for (const item of [first,second]) trackers[item.id]={id:item.id,deadline:expiry,alerted:false};
-   expireInstallers(expiry-1);
+   expireInstallers(expiry-1001);
    assert.equal(events.filter(event=>event.channel.startsWith('job-')).length,0);
-   expireInstallers(expiry);expireInstallers(expiry+1000);
+   expireInstallers(expiry-1000);expireInstallers(expiry);expireInstallers(expiry+1000);
    assert.deepEqual(events.filter(event=>event.channel.startsWith('job-')).map(event=>[event.text,event.muted]),
      [['배틀쉽 재설치',false],['시즈봄버 재설치',true]]);
    removeJobInstaller(first.id);
