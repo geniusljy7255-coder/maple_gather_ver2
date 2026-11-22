@@ -1,5 +1,6 @@
 import { status as detectorStatus } from './detector.js';
 import {bindTimerFormat,timerFormatControl} from './timer-format-control.js';
+import {alarmRecordingControl,bindAlarmRecording} from '../../core/alarm-recordings.js';
 import { jobInstallers, jobSkill, jobIconFile, installerIcon, jobAlarm, onJobInstallersChange } from './job-installers.js';
 import {runePresentation} from './rune-state.js';
 import {experienceBuffGroups,experienceBuffIcon,summarizeExperienceBuffs} from './experience-buffs.js';
@@ -52,6 +53,7 @@ export const html = `
         <input id="huntVoiceVolume" type="range" min="0" max="100" step="5" class="hunt-volume w-full min-w-0 flex-1">
         <output class="w-10 shrink-0 text-right tabular-nums" id="huntVoiceVolumeValue" for="huntVoiceVolume"></output>
       </label>
+      ${alarmRecordingControl('huntAlarmRecording')}
       <fieldset class="min-w-0 rounded-lg bg-slate-50 px-3 py-2">
         <legend class="px-1 text-xs font-bold text-slate-600">알림별 소리</legend>
         <div class="flex flex-wrap gap-x-4 gap-y-2">${ALARM_CHANNELS.map(c=>`<label class="flex items-center gap-2 whitespace-nowrap text-xs"><input id="alarm-${c.id}" type="checkbox" class="cb">${c.label}</label>`).join('')}</div>
@@ -453,6 +455,7 @@ async function togglePip() {
 }
 
 export function bind() {
+  bindAlarmRecording($('huntAlarmRecording'),'hunt');
   bindTimerFormat($('huntTimerFormat'));
   bindJobInstallers();
   $('huntPipBtn').addEventListener('click', togglePip);

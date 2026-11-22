@@ -264,6 +264,8 @@ test('worker publishes the booster clock on the first monitoring frame',async()=
   const paint=(x,y,width,height)=>{
    for(let row=y;row<y+height;row++)for(let col=x;col<x+width;col++)rgba.set([245,225,80,255],(row*w+col)*4);
   };
+  for (let x=320;x<480;x++) for (const y of [35,77]) rgba.set([190,188,185,255],(y*w+x)*4);
+  for (let y=35;y<=77;y++) for (const x of [320,479]) rgba.set([190,188,185,255],(y*w+x)*4);
   for(const start of [0,15,34,49]){
    for(const y of [0,11,22])paint(left+start+2,top+y,8,3);
    for(const x of [0,9])for(const y of [4,15])paint(left+start+x,top+y,3,8);
@@ -276,6 +278,35 @@ test('worker publishes the booster clock on the first monitoring frame',async()=
  }finally{
   globalThis.self=previousSelf;
   globalThis.postMessage=previousPost;
+ }
+});
+test('booster localization ignores bare segmented numbers across different capture sizes',async()=>{
+ const {findVipBooster}=await import('../js/tabs/hunting/vip-booster.js');
+ for (const [w,h,scale,top] of [[800,500,.8,35],[1280,720,1,54],[1920,1080,1,68],[2560,1440,1.5,103]]) {
+  const rgba=new Uint8ClampedArray(w*h*4);
+  const paint=(x,y,width,height,color)=>{
+   for(let row=y;row<y+height;row++) for(let col=x;col<x+width;col++) rgba.set(color,(row*w+col)*4);
+  };
+  const timer=(x,y)=>{
+   const stroke=(a,b,c,d)=>paint(x+Math.round(a*scale),y+Math.round(b*scale),
+     Math.round(c*scale),Math.round(d*scale),[245,225,80,255]);
+   for(const start of [0,15,34,49]){
+    for(const yy of [0,11,22])stroke(start+2,yy,8,3);
+    for(const xx of [0,9])for(const yy of [4,15])stroke(start+xx,yy,3,8);
+   }
+   stroke(29,22,3,3);
+  };
+  const frame={w,h,rgba};
+  timer(Math.round(w*.55),top-6);
+  assert.equal(findVipBooster(frame),null);
+  rgba.fill(0);
+  timer(Math.round(w*.62),top);
+  const plaqueWidth=Math.round(185*scale),plaqueHeight=Math.round(48*scale),x=Math.floor((w-plaqueWidth)/2);
+  const silver=[190,188,185,255];
+  for (const y of [top,top+plaqueHeight]) paint(x,y,plaqueWidth,1,silver);
+  for (const col of [x,x+plaqueWidth-1]) paint(col,top,1,plaqueHeight,silver);
+  timer(x+Math.round(76*scale),top+Math.round(10*scale));
+  assert.equal(findVipBooster(frame),88880,`${w}×${h}`);
  }
 });
 test('raw experience increasing starts hunting even while rounded percentage is unchanged',()=>{

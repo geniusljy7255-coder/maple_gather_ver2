@@ -9,6 +9,54 @@ test('per-alarm mute suppresses sound and speech without suppressing event logs'
  N.notify('룬','alert','rune');assert.equal(beeps,3);assert.equal(voices,1);
  N.setAlarmEnabled('collect',true);N.notify('회수','alert','collect');assert.equal(beeps,6);assert.equal(voices,2);
 });
+test('both helpers request default Korean speech regardless of old voice choices',()=>{
+ const synth=globalThis.speechSynthesis,taken=[];
+ const voice={lang:'en-US',voiceURI:'en-US-AvaMultilingualNeural',name:'Microsoft AvaMultilingual'};
+ globalThis.speechSynthesis={getVoices:()=>[voice],speak(speech){taken.push(speech);speech.onend();}};
+ try {
+  saved.set('hunt_alarm_voice','quick');
+  saved.set('boss_alarm_voice','voice:en-US-AvaMultilingualNeural');
+  N.notify('사냥','info');
+  N.notify('보스','info','boss-test');
+  assert.equal(taken[0].rate,undefined);
+  assert.equal(taken[0].voice,undefined);
+  assert.equal(taken[1].voice,undefined);
+  assert.deepEqual(taken.map(speech=>speech.lang),['ko-KR','ko-KR']);
+ } finally {
+  saved.delete('hunt_alarm_voice');
+  saved.delete('boss_alarm_voice');
+  globalThis.speechSynthesis=synth;
+ }
+});
+test('Haena plays recorded alerts in order and uses speech for unsupported or failed clips',async()=>{
+ const synth=globalThis.speechSynthesis,Audio=globalThis.Audio;
+ const players=[],spoken=[];
+ let rejectNext=false;
+ globalThis.Audio=class {
+  constructor(url){this.url=url;players.push(this);}
+  play(){return rejectNext ? Promise.reject(Error('missing clip')) : Promise.resolve();}
+  pause(){}
+ };
+ globalThis.speechSynthesis={speak(speech){spoken.push(speech.text);speech.onend();}};
+ try {
+  saved.set('boss_alarm_recording','Haena');
+  N.notify('왼비, 구체','alert','boss-karing');
+  assert.match(players[0].url,/voice\/Haena\/kalos-left\.mp3$/);
+  players[0].onended();
+  assert.match(players[1].url,/voice\/Haena\/kalos-orb\.mp3$/);
+  players[1].onended();
+  N.notify('러쉬 사용 가능','alert','boss-utility');
+  assert.deepEqual(spoken,['러쉬 사용 가능']);
+  rejectNext=true;
+  N.notify('일격필살 준비','alert','boss-strike');
+  await Promise.resolve();
+  assert.deepEqual(spoken,['러쉬 사용 가능','일격필살 준비']);
+ } finally {
+  saved.delete('boss_alarm_recording');
+  globalThis.Audio=Audio;
+  globalThis.speechSynthesis=synth;
+ }
+});
 test('boss voice and alarm settings are independent of hunting',()=>{
  const oldVoice=N.getVoice(),oldVolume=N.getVoiceVolume();
  const before=voices;

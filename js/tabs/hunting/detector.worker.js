@@ -4,7 +4,7 @@ import { makeTemplate, prepareFrame, detect, resizeIcon } from './matcher.js';
 import { applyTimerFormat, readDigits } from './digits.js';
 import { analyzeExperience, analyzeScreen, resetScreenMonitor } from './screen-monitor.js';
 import {createExperienceBuffDetector,scanExperienceBuffs} from './experience-buff-detector.js';
-import {readVipBooster} from './vip-booster.js';
+import {findVipBooster} from './vip-booster.js';
 import {readStackCount} from './stack-count.js';
 import {isDeathBlossom} from './job-installers.js';
 import {readMinuteImage} from './number-image-reader.js';
@@ -17,7 +17,6 @@ const INSTALLER_SIZES = [...new Set([
 let targets = [], generation = 0, dimensions = '', scanCursor = 0;
 let installerSize = null;
 let experienceBox = null;
-let boosterDimensions = '', boosterTile = 0, lastBoosterTile = null;
 let buffDetector=createExperienceBuffDetector([]),buffConfig='',buffDimensions='';
 const isLara = target => target.file?.startsWith('라라_');
 const isInstaller = target => target.id === "janus" || target.id === "fountain" || target.id.startsWith("job-");
@@ -91,32 +90,6 @@ function readExperienceBuffs(frame,now,dimensions) {
   return scanExperienceBuffs(buffDetector,frame,now,{maxGroups:frame.w>=1800 ? 1 : 2});
 }
 
-function findVipBooster(frame) {
-  const size = frame.w+'x'+frame.h;
-  if (size !== boosterDimensions) {
-    boosterDimensions = size;
-    boosterTile = 0;
-    lastBoosterTile = null;
-  }
-  const hint={x:Math.floor(frame.w*.475),y:Math.floor(frame.h*.07),
-    w:Math.ceil(frame.w*.083),h:Math.ceil(frame.h*.115)};
-  const usual=readVipBooster(cropFrame(frame,hint.x,hint.y,hint.w,hint.h).frame);
-  if (usual!==null) return usual;
-  const w = Math.min(frame.w,Math.max(180,Math.ceil(frame.w*.38)));
-  const h = Math.min(frame.h,Math.max(100,Math.ceil(frame.h*.38)));
-  for (const tile of new Set([lastBoosterTile,boosterTile++%16,boosterTile++%16])) {
-    if (tile === null) continue;
-    const x = Math.round((tile%4)*(frame.w-w)/3);
-    const y = Math.round(Math.floor(tile/4)*(frame.h-h)/3);
-    const timer = readVipBooster(cropFrame(frame,x,y,w,h).frame);
-    if (timer === null) continue;
-    lastBoosterTile = tile;
-    return timer;
-  }
-  lastBoosterTile = null;
-  return null;
-}
-
 self.onmessage = ({ data }) => {
   try {
     if (data.type === 'config') {
@@ -145,7 +118,7 @@ self.onmessage = ({ data }) => {
           reject: t.reject ? tpl(resizeIcon(t.reject, size)) : null, last: null
         })).map(variant=>({...variant,main:variant.templates[0]}))
       }));
-      dimensions = '';scanCursor=0;resetScreenMonitor(); experienceBox = null; boosterDimensions = '';
+      dimensions = '';scanCursor=0;resetScreenMonitor(); experienceBox = null;
       return;
     }
     if (data.generation !== generation) return;

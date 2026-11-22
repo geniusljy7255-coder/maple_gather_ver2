@@ -1,9 +1,11 @@
 /* 알림: 효과음 + (선택) 음성 */
+import {alarmClips} from './alarm-recordings.js';
+
 export const ALARM_CHANNELS=[{id:'collect',label:'아이템 회수'},{id:'rune',label:'룬 출현'},{id:'janus',label:'솔 야누스'},{id:'fountain',label:'에르다 파운틴'},{id:'booster',label:'VIP 부스터'}];
 export const BOSS_ALARM_CHANNELS=[
   {id:'boss-burst',label:'극딜'},{id:'boss-semi',label:'준극딜'},
   {id:'boss-strike',label:'일격필살'},{id:'boss-utility',label:'생존기·유틸기'},
-  {id:'boss-karing',label:'패턴 도우미 - 카링'}
+  {id:'boss-karing',label:'패턴 도우미'}
 ];
 const alarmScope = id => id.startsWith('boss-') ? 'boss' : 'hunt';
 const alarmKey = id => alarmScope(id)==='boss' ? 'boss_alarm_'+id.slice(5) : 'hunt_alarm_'+id;
@@ -74,9 +76,18 @@ function playNextVoice() {
     const {text, channel} = voiceQueue.shift();
     const scope=alarmScope(channel);
     if (!getVoice(scope) || !isAlarmEnabled(channel)) continue;
+    const clips=typeof Audio==='function' ? alarmClips(text,channel,scope) : [];
     speaking = true;
     speechScope = scope;
     let done = false;
+    let cancelPlayback=()=>{};
+    let started=false;
+    const volume=getVoiceVolume(scope)/100;
+    const onStart=()=>{
+      if (started || done) return;
+      started=true;
+      voiceStartListeners.forEach(listener=>listener({text,channel}));
+    };
     const finish = () => {
       if (done) return;
       done = true;
@@ -86,24 +97,54 @@ function playNextVoice() {
       stopSpeech = null;
       playNextVoice();
     };
-    const timeout = setTimeout(() => {
-      if (done) return;
-      try { speechSynthesis.cancel(); } finally { finish(); }
-    }, 8000);
     stopSpeech=()=>{
-      try { speechSynthesis.cancel(); } finally { finish(); }
+      try { cancelPlayback(); } finally { finish(); }
     };
-    try {
-      const speech = new SpeechSynthesisUtterance(text);
-      speech.lang = 'ko-KR';
-      speech.volume = getVoiceVolume(scope) / 100;
-      speech.onstart = () => voiceStartListeners.forEach(listener=>listener({text,channel}));
-      speech.onend = finish;
-      speech.onerror = finish;
-      speechSynthesis.speak(speech);
-    } catch {
-      finish();
-    }
+    const timeout=setTimeout(stopSpeech,clips.length ? Math.max(8000,clips.length*4000) : 8000);
+    const speak=line=>{
+      try {
+        const speech=new SpeechSynthesisUtterance(line);
+        speech.lang='ko-KR';
+        speech.volume=volume;
+        speech.onstart=onStart;
+        speech.onend=finish;
+        speech.onerror=finish;
+        cancelPlayback=()=>speechSynthesis.cancel();
+        speechSynthesis.speak(speech);
+      } catch { finish(); }
+    };
+    const playClip=index=>{
+      if (done) return;
+      if (index===clips.length) {finish();return;}
+      let player;
+      const detach=()=>{
+        if (!player) return;
+        player.onended=player.onerror=player.onplaying=null;
+      };
+      let settled=false;
+      const advance=callback=>{
+        if (done || settled) return;
+        settled=true;
+        detach();
+        callback();
+      };
+      const fallback=()=>advance(()=>speak(clips.slice(index).map(clip=>clip.text).join(' ')));
+      try {
+        player=new Audio(clips[index].url);
+        player.volume=volume;
+        player.onplaying=onStart;
+        player.onended=()=>advance(()=>playClip(index+1));
+        player.onerror=fallback;
+        cancelPlayback=()=>{
+          settled=true;
+          detach();
+          player.pause();
+        };
+        player.play()?.catch(fallback);
+      } catch { fallback(); }
+    };
+    if (clips.length) playClip(0);
+    else speak(text);
     return;
   }
 }
@@ -116,7 +157,8 @@ export function notify(text, kind = 'info', channel='general') {
     if (audible && ctx) (PATTERNS[kind] || PATTERNS.info).forEach((f, i) => beep(f, ctx.currentTime + i * 0.25));
   } catch (e) { /* 무시 */ }
 
-  if (audible && getVoice(alarmScope(channel)) && typeof speechSynthesis !== 'undefined') {
+  if (audible && getVoice(alarmScope(channel)) &&
+      (typeof speechSynthesis !== 'undefined' || typeof Audio==='function')) {
     if (voiceQueue.length < 12) voiceQueue.push({text, channel});
     playNextVoice();
   }

@@ -1,6 +1,75 @@
 const sevenSegments=['1110111','0010010','1011101','1011011','0111010',
   '1101011','1101111','1010010','1111111','1111011'];
 
+export function findVipBooster({rgba,w,h}) {
+  const center=Math.floor(w/2),left=Math.max(0,center-Math.ceil(w*.26)),right=Math.min(w,center+Math.ceil(w*.26));
+  const rails=[];
+  const edge=(x,y)=>{
+    const p=(y*w+x)*4,r=rgba[p],g=rgba[p+1],b=rgba[p+2];
+    return Math.min(r,g,b)>=115 && Math.max(r,g,b)-Math.min(r,g,b)<=62;
+  };
+  for (let y=1;y<Math.min(h*.25,300);y++) {
+    let start=-1,last=-1,count=0;
+    for (let x=left;x<=right+3;x++) {
+      if (x<right && edge(x,y)) {
+        if (start<0) start=x;
+        last=x;
+        count++;
+      } else if (start>=0 && x-last>2) {
+        const width=last-start+1;
+        if (width>=65 && width<=Math.min(w*.48,540) && count>=width*.78 &&
+            Math.abs((start+last)/2-center)<=Math.max(8,width*.12)) {
+          rails.push({x:start,y,width});
+        }
+        start=last=-1;
+        count=0;
+      }
+    }
+  }
+  const candidates=[];
+  for (const top of rails) for (const bottom of rails) {
+    const height=bottom.y-top.y;
+    if (height<top.width*.19 || height>top.width*.35 ||
+        Math.abs(top.x-bottom.x)>top.width*.08 || Math.abs(top.width-bottom.width)>top.width*.12) continue;
+    const width=(top.width+bottom.width)/2;
+    const x=(top.x+bottom.x)/2;
+    const sideRadius=Math.max(3,Math.round(width*.055));
+    const hasSide=position=>[.30,.50,.70].filter(fraction=>{
+      const row=Math.round(top.y+height*fraction);
+      for (let col=Math.max(0,Math.round(position)-sideRadius);col<=Math.min(w-1,Math.round(position)+sideRadius);col++) {
+        if (edge(col,row)) return true;
+      }
+      return false;
+    }).length>=2;
+    if (!hasSide(x) || !hasSide(x+width-1)) continue;
+    let dark=0;
+    for (const fx of [.06,.12,.88,.94]) for (const fy of [.24,.42,.58,.76]) {
+      const p=(Math.round(top.y+height*fy)*w+Math.round(x+width*fx))*4;
+      if (Math.max(rgba[p],rgba[p+1],rgba[p+2])<110) dark++;
+    }
+    if (dark<11) continue;
+    candidates.push({x,y:top.y,width,height,score:dark-Math.abs(height/width-.265)*14-
+      Math.abs(x+width/2-center)/width*5});
+  }
+  candidates.sort((a,b)=>b.score-a.score);
+  for (const box of candidates.slice(0,12)) {
+    // The label and trailing unit are outside the numeric window of the plaque.
+    const start=Math.round(box.x+box.width*.35),end=Math.round(box.x+box.width*.91);
+    const top=Math.round(box.y+box.height*.12),bottom=Math.round(box.y+box.height*.88);
+    const width=end-start,height=bottom-top;
+    const scale=height<30 ? 34/height : Math.min(1,42/height);
+    const rw=Math.round(width*scale),rh=Math.round(height*scale);
+    const crop=new Uint8ClampedArray(rw*rh*4);
+    for (let y=0;y<rh;y++) for (let x=0;x<rw;x++) {
+      const p=((top+Math.floor(y/scale))*w+start+Math.floor(x/scale))*4;
+      crop.set(rgba.subarray(p,p+4),(y*rw+x)*4);
+    }
+    const value=readVipBooster({rgba:crop,w:rw,h:rh});
+    if (value!==null) return value;
+  }
+  return null;
+}
+
 // The readout is a four-digit segmented clock with a low decimal point.
 export function readVipBooster({rgba,w,h}){
   const stride=w+1, sums=new Uint32Array(stride*(h+1));

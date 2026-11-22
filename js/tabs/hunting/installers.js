@@ -67,7 +67,7 @@ export function bindJobInstallers() {
               </select>
               <span class="hunt-select-arrow" aria-hidden="true"></span>
             </div>
-            <button type="button" aria-label="설치기 삭제" title="설치기 삭제" class="h-7 w-6 shrink-0 rounded border border-slate-300 bg-white text-base leading-none text-slate-500 transition hover:bg-slate-100 hover:text-red-600" data-remove>×</button>
+            <button type="button" aria-label="설치기 삭제" title="설치기 삭제" class="grid h-7 w-7 shrink-0 place-items-center rounded border border-slate-300 bg-white p-0 text-base leading-none text-slate-500 transition hover:bg-slate-100 hover:text-red-600" data-remove>×</button>
           </div><div id="trk-${item.id}-state" class="text-lg font-black text-slate-400">스킬 선택</div>`;
         card.querySelector('select').addEventListener('change', event => updateJobInstaller(item.id,{skill:event.target.value}));
         card.querySelector('[data-remove]').addEventListener('click', () => removeJobInstaller(item.id));

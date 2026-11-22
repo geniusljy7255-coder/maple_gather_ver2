@@ -1,10 +1,12 @@
 import {esc} from '../core/dom.js';
+import {alarmRecordingControl,bindAlarmRecording} from '../core/alarm-recordings.js';
 import {onTick} from '../core/clock.js';
 import {formatMS} from '../core/format.js';
 import {BOSS_ALARM_CHANNELS,getVoice,setVoice,getVoiceVolume,setVoiceVolume,isAlarmEnabled,setAlarmEnabled,notify} from '../core/notify.js';
 import {getInfo,grabFrame,onCaptureChange,startCapture,stopCapture} from './hunting/capture.js';
 import {imageData,crop} from './hunting/monitor-assets.js';
 import {getTimerFormat,onTimerFormatChange} from './hunting/detector.js';
+import {kalosLabels} from './kalos-minimap.js';
 import {bindTimerFormat,timerFormatControl} from './hunting/timer-format-control.js';
 import {advanceBossAlert,bossReference,confirmBossRegion,readBossRegion} from './boss-recognition.js';
 import {BOSS_NAME_LIMIT,BOSS_PRESET_LIMIT,BOSS_UTILITY_LIMIT,addBossPreset,applyBossPresetDraft,bossName,bossRegion,
@@ -82,6 +84,7 @@ const html=`
         <input id="bossVoiceVolume" type="range" min="0" max="100" step="5" class="hunt-volume w-full min-w-0 flex-1">
         <output class="w-10 shrink-0 text-right tabular-nums" for="bossVoiceVolume" data-boss-volume-value></output>
       </label>
+      ${alarmRecordingControl('bossAlarmRecording')}
       <fieldset class="min-w-0 rounded-lg bg-slate-50 px-3 py-2">
         <legend class="px-1 text-xs font-bold text-slate-600">알림별 소리</legend>
         <div class="flex flex-wrap gap-x-4 gap-y-2">${BOSS_ALARM_CHANNELS.filter(channel=>channel.id!=='boss-karing').map(alarmControl).join('')}</div>
@@ -122,8 +125,8 @@ const html=`
     <div class="pointer-events-none absolute border-2 border-indigo-400 bg-indigo-400/20" data-boss-selection hidden></div>
   </div>
 </dialog>
-    ${['burst','semi'].map(type=>`<section class="card space-y-2">
-      <div class="flex items-center justify-between gap-2">
+    ${['burst','semi'].map(type=>`<section class="card flex items-center">
+      <div class="flex w-full items-center justify-between gap-2">
         <h2 class="text-sm font-bold">${titles[type]} 알림</h2>
         <div data-boss-list="${type}"></div>
       </div>
@@ -138,7 +141,10 @@ const html=`
       <button type="button" class="${button}" data-boss-add="utility">스킬 추가</button>
     </div>
     <div class="${utilityColumns} text-[10px] font-semibold text-slate-500">
-      <span class="text-center">음성 알림</span><span>이름 (변경 가능)</span>
+      <span class="text-center">음성 알림</span>
+      <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_3.5rem] items-center gap-1">
+        <span>이름 (변경 가능)</span><span class="text-center">쿨타임</span>
+      </div>
       <span class="text-center">영역 지정</span><span class="text-center">삭제</span>
     </div>
     <div class="space-y-2" data-boss-list="utility"></div>
@@ -150,7 +156,7 @@ const html=`
     <div class="flex gap-2">
       <button type="button" class="${button}" data-pattern-boss="off" aria-pressed="false">사용 안 함</button>
       <button type="button" class="${accentButton}" data-pattern-boss="karing" aria-pressed="true" aria-controls="karing-pattern-panel">카링</button>
-      <button type="button" class="${button}" data-pattern-boss="kalos" aria-pressed="false">칼로스</button>
+      <button type="button" class="${button}" data-pattern-boss="kalos" aria-pressed="false" aria-controls="kalos-pattern-panel">칼로스</button>
     </div>
     <div data-karing-controls><div class="flex flex-wrap items-center gap-2 [&_button]:h-8">
       <label class="flex items-center gap-1.5 whitespace-nowrap text-xs">게이지 알림
@@ -158,10 +164,23 @@ const html=`
       </label>
       <button type="button" data-karing-area></button>
     </div></div>
+    <button type="button" data-kalos-area hidden></button>
   </div>
   <div id="karing-pattern-panel" class="space-y-2">
     <div class="grid gap-2" data-karing-gauges></div>
     <p class="hint font-bold" data-karing-recommendation hidden></p>
+  </div>
+  <div id="kalos-pattern-panel" class="space-y-3" hidden>
+    <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      ${Object.entries(kalosLabels).map(([key,name])=>`<div class="flex items-center justify-between gap-2 rounded-lg border border-slate-300 px-2.5 py-2 text-xs" data-kalos-kind="${key}">
+        <strong>✦ ${name}</strong><span class="hint" data-kalos-kind-state>—</span>
+      </div>`).join('')}
+    </div>
+    <div class="flex items-center gap-2 text-xs">
+      <strong>제거 게이지</strong>
+      <div class="h-2 flex-1 overflow-hidden rounded-full" style="background:var(--surface-soft)" aria-hidden="true"><div class="h-full bg-indigo-500" data-kalos-charge-fill style="width:0"></div></div>
+      <span class="hint tabular-nums" data-kalos-charge>—</span>
+    </div>
   </div>
 </section>
 <section class="card space-y-2">
@@ -190,12 +209,61 @@ function skillRow(skill) {
 
 function mount(section) {
   const $=selector=>section.querySelector(selector);
+  bindAlarmRecording($('#bossAlarmRecording'),'boss');
   const settings=loadBossPresets(localStorage);
   const current=()=>settings.presets[settings.active];
   const utilityAtLimit=()=>current().skills.filter(skill=>skill.type==='utility' && !isAscent(skill)).length>=BOSS_UTILITY_LIMIT;
   let karingSettings;
   try { karingSettings=JSON.parse(localStorage.getItem('boss_karing_gauges')); } catch {}
   const karingPanel=$('#karing-pattern-panel');
+  const kalosPanel=$('#kalos-pattern-panel');
+  const kalosAreaButton=$('[data-kalos-area]');
+  const kalosFields=[...section.querySelectorAll('[data-kalos-kind]')];
+  const kalosChargeText=$('[data-kalos-charge]');
+  const kalosChargeFill=$('[data-kalos-charge-fill]');
+  const kalosChargePanel={type:'gauge',name:'칼로스 제거 게이지',region:null};
+  try {
+    const region=JSON.parse(localStorage.getItem('boss_kalos_charge_region'));
+    if (region) kalosChargePanel.region=bossRegion([region.x,region.y],[region.x+region.width,region.y+region.height]);
+  } catch {}
+  let patternSession=0,kalosCharge=null,kalosChargeSample=null;
+  let kalosActive=[];
+  function renderKalosPip() {
+    if (!pip || pip.closed) return;
+    const gauge=pip.document.querySelector('[data-pip-kalos-charge]');
+    if (gauge) {
+      const percent=kalosCharge?.percent ?? 0;
+      gauge.firstElementChild.style.height=`${kalosCharge?.full ? 100 : percent}%`;
+      gauge.classList.toggle('full',Boolean(kalosCharge?.full));
+      gauge.title=kalosCharge?.full ? '간섭 제거 가능' : kalosCharge ? `제거 게이지 ${percent}%` : '제거 게이지 미확인';
+      gauge.setAttribute('aria-label',gauge.title);
+    }
+    for (const label of pip.document.querySelectorAll('[data-pip-kalos-kind]')) {
+      const active=kalosActive.includes(label.dataset.pipKalosKind);
+      label.classList.toggle('active',active);
+      label.setAttribute('aria-label',label.textContent+(active ? ' 간섭 활성' : ' 간섭 없음'));
+    }
+  }
+  function renderKalos({found=false,active=[]}={}) {
+    kalosActive=active;
+    renderKalosPip();
+    for (const field of kalosFields) {
+      const on=active.includes(field.dataset.kalosKind);
+      field.classList.toggle('border-red-500',on);
+      field.classList.toggle('border-slate-300',!on);
+      field.classList.toggle('text-red-600',on);
+      field.querySelector('[data-kalos-kind-state]').textContent=on ? '간섭' : found ? '대기' : '—';
+    }
+    kalosChargeFill.style.width=`${kalosCharge?.percent ?? 0}%`;
+    kalosChargeText.textContent=kalosCharge?.full ? '제거 가능' : kalosCharge ? kalosCharge.percent+'%' : '—';
+  }
+  function saveKalosCharge() {
+    kalosCharge=kalosChargeSample=null;
+    try { localStorage.setItem('boss_kalos_charge_region',JSON.stringify(kalosChargePanel.region)); } catch {}
+    kalosChargeFill.style.width='0';
+    kalosChargeText.textContent='—';
+    renderKalosPip();
+  }
   const karingAreaButton=$('[data-karing-area]');
   const karingControls=$('[data-karing-controls]');
   const thresholdInput=$('[data-karing-threshold]');
@@ -292,8 +360,25 @@ function mount(section) {
       panel.className='pip-gauges';
       panel.innerHTML=gaugeRows({compact:true});
       strip.append(panel);
+    } else if (!kalosPanel.hidden) {
+      const panel=doc.createElement('section');
+      panel.className='pip-kalos';
+      panel.setAttribute('aria-label','칼로스 간섭');
+      const gauge=doc.createElement('div');
+      gauge.dataset.pipKalosCharge='';
+      gauge.setAttribute('role','img');
+      gauge.append(doc.createElement('span'));
+      panel.append(gauge);
+      for (const [key,name] of Object.entries(kalosLabels)) {
+        const label=doc.createElement('span');
+        label.dataset.pipKalosKind=key;
+        label.textContent=name;
+        panel.append(label);
+      }
+      strip.append(panel);
     }
     body.append(strip);
+    renderKalosPip();
     renderReadings(Date.now());
   }
   function clearReadings() {
@@ -453,6 +538,18 @@ function mount(section) {
           if (data.gaugeOnly) busy=false;
           if (data.revision!==revision) return;
           if (isKaringEnabled()) updateGauges(data.gaugeValues,data.time);
+          if (!kalosPanel.hidden && data.kalos) {
+            const {alerts,charge}=data.kalos;
+            if (alerts.length) notify(alerts.map(key=>kalosLabels[key]).join(', '),'alert','boss-karing');
+            if (charge) {
+              if (kalosChargeSample?.full===charge.full && data.time-kalosChargeSample.at<=2000) {
+                if (charge.full && !kalosCharge?.full) notify('간섭 제거 가능','alert','boss-karing');
+                kalosCharge=charge;
+              }
+              kalosChargeSample={full:charge.full,at:data.time};
+            }
+            renderKalos(data.kalos);
+          }
           for (const reading of data.readings) {
             const skill=current().skills.find(item=>item.id===reading.id);
             if (!skill?.region) continue;
@@ -505,16 +602,19 @@ function mount(section) {
       return;
     }
     const karingRegion=isKaringEnabled() ? gaugePanel.region : null;
-    if (busy || now-lastScan<(karingRegion ? 250 : 750)) return;
+    const kalosEnabled=!kalosPanel.hidden;
+    const patternActive=Boolean(karingRegion || kalosEnabled);
+    if (busy || now-lastScan<(patternActive ? 250 : 750)) return;
     const frame=grabFrame('boss');
     if (!frame) return;
     lastScan=now;
-    const gaugeOnly=Boolean(karingRegion && now-lastFullScan<750);
+    const gaugeOnly=patternActive && now-lastFullScan<750;
     if (!gaugeOnly) lastFullScan=now;
     busy=true;
     worker.postMessage({w:frame.width,h:frame.height,data:frame.data,format:getTimerFormat(),
       skills:current().skills.filter(skill=>skill.region),
-      karingRegion,gaugeOnly,time:now,revision},[frame.data.buffer]);
+      karingRegion,kalosEnabled,kalosChargeRegion:kalosEnabled ? kalosChargePanel.region : null,
+      patternSession,gaugeOnly,time:now,revision},[frame.data.buffer]);
   });
   bindTimerFormat($('#bossTimerFormat'));
   onTimerFormatChange(()=>{
@@ -550,7 +650,7 @@ function mount(section) {
           <div class="h-full rounded-full bg-indigo-500" style="width:0"></div>
         </div>
         <span class="hint min-w-[6.5rem] text-right tabular-nums" data-karing-value="${key}">—</span>
-        ${compact ? '' : `<div class="hint col-span-3 flex flex-wrap gap-x-3 border-t pt-1 md:col-span-1 md:border-l md:border-t-0 md:pl-2 md:pt-0" style="border-color:var(--line)">
+        ${compact ? '' : `<div class="hint col-span-3 flex flex-wrap gap-x-3 border-t pt-1 md:col-span-1 md:justify-end md:border-l md:border-t-0 md:pl-2 md:pt-0" style="border-color:var(--line)">
           <span class="whitespace-nowrap"><span class="karing-red" aria-label="상승">↑</span> <span class="${threadTextClass[up]}">${up} 실 (${karingThreadAttack(up)} 공격)</span></span>
           <span class="whitespace-nowrap"><span class="karing-blue" aria-label="하락">↓</span> <span class="${threadTextClass[down]}">${down} 실 (${karingThreadAttack(down)} 공격)</span></span>
         </div>`}
@@ -561,7 +661,9 @@ function mount(section) {
     renderPresets();
     $('[data-boss-add="utility"]').disabled=utilityAtLimit();
     karingAreaButton.className=gaugePanel.region ? button : accentButton;
-    karingAreaButton.textContent=gaugePanel.region ? '전체 영역 수정' : '전체 영역 지정';
+    karingAreaButton.textContent=gaugePanel.region ? '게이지 영역 수정' : '게이지 영역 지정';
+    kalosAreaButton.className=`${kalosChargePanel.region ? button : accentButton} h-8`;
+    kalosAreaButton.textContent=kalosChargePanel.region ? '게이지 영역 수정' : '게이지 영역 지정';
     $('[data-karing-gauges]').innerHTML=gaugeRows();
     for (const [type,title] of Object.entries(titles)) {
       const list=current().skills.filter(skill=>skill.type===type);
@@ -630,7 +732,9 @@ function mount(section) {
     editorFrame={w:width,h:height,rgba:frame.data};
     canvas.getContext('2d').putImageData(new ImageData(frame.data,width,height),-left,-top);
     editing=skill;
-    $('[data-boss-editor-hint]').textContent=skill.type==='gauge'
+    $('[data-boss-editor-hint]').textContent=skill===kalosChargePanel
+      ? '미니맵 아래 장치의 가운데 구체와 금색 테두리를 함께 드래그하세요.'
+      : skill.type==='gauge'
       ? '궁기·도올·혼돈이 모여 있는 원형 게이지 전체가 들어오도록 드래그하세요.'
       : '스킬이 사용 가능한 상태에서 아이콘 하나를 테두리까지 드래그하세요.';
     drag=null;
@@ -641,6 +745,8 @@ function mount(section) {
   }
   function updateShare() {
     const active=getInfo('boss').active;
+    if (!active) kalosCharge=kalosChargeSample=null;
+    renderKalos();
     share.textContent=active ? '화면 공유 중지' : '화면 공유 시작';
     share.className=active ? shareStop : shareStart;
     shareChip.textContent=active ? '공유 중' : '공유 안 함';
@@ -791,6 +897,11 @@ function mount(section) {
     renderPip();
   });
   section.addEventListener('click',event=>{
+    const kalosButton=event.target.closest('[data-kalos-area]');
+    if (kalosButton) {
+      captureFor(kalosChargePanel,kalosButton);
+      return;
+    }
     const gaugeButton=event.target.closest('[data-karing-area]');
     if (gaugeButton) {
       captureFor(gaugePanel,gaugeButton);
@@ -848,9 +959,12 @@ function mount(section) {
     if (!editing || !draft || !editorFrame) return;
     editing.region=draft;
     if (editing.type==='gauge') {
-      clearGaugeReadings();
       revision++;
-      saveGaugeSettings();
+      if (editing===kalosChargePanel) saveKalosCharge();
+      else {
+        clearGaugeReadings();
+        saveGaugeSettings();
+      }
       closeEditor();
       render();
       return;
@@ -869,8 +983,11 @@ function mount(section) {
     editing.region=draft=drag=null;
     revision++;
     if (editing.type==='gauge') {
-      clearGaugeReadings();
-      saveGaugeSettings();
+      if (editing===kalosChargePanel) saveKalosCharge();
+      else {
+        clearGaugeReadings();
+        saveGaugeSettings();
+      }
     } else {
       editing.reference=null;
       observations.delete(editing.id);
@@ -907,13 +1024,19 @@ function mount(section) {
       const showKaring=choice.dataset.patternBoss==='karing';
       if (choice.getAttribute('aria-pressed')==='true') return;
       karingPanel.hidden=!showKaring;
+      kalosPanel.hidden=choice.dataset.patternBoss!=='kalos';
+      kalosAreaButton.hidden=kalosPanel.hidden;
+      kalosCharge=kalosChargeSample=null;
+      if (!kalosPanel.hidden) renderKalos();
       karingControls.hidden=!showKaring;
       for (const item of patternButtons) {
         item.className=item===choice ? accentButton : button;
         item.setAttribute('aria-pressed',String(item===choice));
       }
       if (!showKaring && editing===gaugePanel) closeEditor();
+      if (kalosPanel.hidden && editing===kalosChargePanel) closeEditor();
       clearGaugeReadings();
+      patternSession++;
       revision++;
       renderGauges();
       renderPip();
@@ -930,7 +1053,7 @@ function mount(section) {
     pipButton.disabled=true;
     try {
       const extra=current().skills.filter(skill=>skill.type==='utility' && !isAscent(skill)).length;
-      const width=24+(2+Math.ceil(extra/2))*142+(isKaringEnabled() ? 222 : 0);
+      const width=24+(2+Math.ceil(extra/2))*142+(isKaringEnabled() ? 222 : kalosPanel.hidden ? 0 : 156);
       const window=await api.requestWindow({width,height:108});
       pip=window;
       window.document.title='보스 도우미';
@@ -955,6 +1078,19 @@ function mount(section) {
         .pip-skill strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
         .pip-skill span,[data-karing-value]{color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
         .pip-gauges{display:grid;grid-template-rows:repeat(3,minmax(0,1fr));flex:0 0 216px;min-width:0}
+        .pip-kalos{display:grid;grid-template-columns:7px repeat(3,minmax(0,1fr));grid-template-rows:repeat(2,1fr);
+          grid-template-areas:"charge left drone right" "charge left orb right";flex:0 0 150px;box-sizing:border-box;
+          align-items:center;gap:3px 4px;padding-left:6px;text-align:center;color:var(--muted)}
+        [data-pip-kalos-charge]{grid-area:charge;align-self:stretch;display:flex;align-items:end;margin-block:4px;
+          overflow:hidden;border:1px solid var(--line);border-radius:4px;background:var(--surface)}
+        [data-pip-kalos-charge]>span{width:100%;background:var(--accent)}
+        [data-pip-kalos-charge].full{border-color:var(--accent)}
+        [data-pip-kalos-kind="left"]{grid-area:left}
+        [data-pip-kalos-kind="right"]{grid-area:right}
+        [data-pip-kalos-kind="drone"]{grid-area:drone}
+        [data-pip-kalos-kind="orb"]{grid-area:orb}
+        [data-pip-kalos-kind]{border:1px solid var(--line);border-radius:5px;padding:2px;white-space:nowrap}
+        [data-pip-kalos-kind].active{border-color:var(--pip-thread-red);color:var(--pip-thread-red);font-weight:800}
         [data-karing-row]{display:grid;grid-template-columns:2rem minmax(0,1fr) 5.5rem;align-items:center;
           gap:4px;padding:0 6px}
         [data-karing-bar]{height:5px;overflow:hidden;border-radius:5px;background:var(--line)!important}
