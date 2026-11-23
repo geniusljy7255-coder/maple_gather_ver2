@@ -3,6 +3,8 @@ import {getSchedulerCharacters} from './tabs/scheduler.js';
 import {onCompanionSpeech,onVoiceStart} from './core/notify.js';
 import {mapFooting} from './companion-footing.js';
 
+import {mountPlaza} from './plaza.js';
+
 const settingsKey='ddangkaera-character-companion';
 const mapKey='ddangkaera-companion-map';
 const chairKey='ddangkaera-companion-chair';
@@ -28,6 +30,10 @@ const platforms={
   ludibrium:{width:5385,height:1428,left:130,right:5255,y:1230,foregroundTop:142,centered:true},
   kerning:{width:3870,height:1540,left:475,right:3395,y:1366,foregroundTop:132,centered:true},
   nautilus:{width:4613,height:1557,left:130,right:4483,y:1505,foregroundTop:252,centered:true}
+};
+const mapImages={
+  nautilus:'nautilus',ludibrium:'ludibrium',spiritTree:'arcana-spirit-tree-background',
+  edelstein:'edelstein',eurel:'eurel',kerning:'kerning-city'
 };
 const idleLines=[
   '같이 산책하니까 좋다.',
@@ -93,6 +99,13 @@ function makeBalloon(){
   }};
 }
 
+function makePlazaName(name){
+  const label=document.createElement('span');
+  label.className='companion-plaza-name';
+  label.textContent=name;
+  return label;
+}
+
 export function mountCharacterCompanion(trigger){
   const sprite=document.createElement('div');
   sprite.className='character-companion';
@@ -133,25 +146,62 @@ export function mountCharacterCompanion(trigger){
   }
   document.body.append(sprite,ground,menu,visitor);
 
-  const dialog=document.createElement('dialog');
-  dialog.id='characterCompanionSettings';
-  dialog.className='companion-settings';
-  dialog.setAttribute('aria-labelledby','companionTitle');
-  dialog.innerHTML=`
-    <form class="companion-form">
+  const settingsPopup=document.createElement('div');
+  settingsPopup.id='characterCompanionSettings';
+  settingsPopup.className='companion-settings';
+  settingsPopup.popover='auto';
+  settingsPopup.innerHTML=`
+    <nav class="companion-quick-menu" aria-label="캐릭터 설정 메뉴">
+      <button type="button" data-open-section="character">캐릭터 관리</button>
+      <button type="button" data-open-section="map">맵 관리</button>
+      <button type="button" data-open-section="plaza">광장</button>
+    </nav>
+    <section class="companion-form" data-settings-body aria-labelledby="companionTitle" hidden>
       <div class="companion-heading">
-        <h2 id="companionTitle">내 캐릭터</h2>
+        <h2 id="companionTitle">캐릭터 설정</h2>
         <button type="button" data-close aria-label="닫기">×</button>
       </div>
+      <div class="companion-sections" role="tablist" aria-label="캐릭터 설정 탭">
+        <button type="button" class="tab-btn" role="tab" id="companion-character-tab" aria-controls="companion-character-panel" data-section="character">캐릭터 관리</button>
+        <button type="button" class="tab-btn" role="tab" id="companion-map-tab" aria-controls="companion-map-panel" data-section="map">맵 관리</button>
+        <button type="button" class="tab-btn" role="tab" id="companion-plaza-tab" aria-controls="companion-plaza-panel" data-section="plaza">광장</button>
+      </div>
+      <div role="tabpanel" id="companion-character-panel" aria-labelledby="companion-character-tab" data-panel="character" hidden>
+      <form class="companion-form">
       <label>넥슨 API 키 <input name="apiKey" type="password" autocomplete="off" spellcheck="false"></label>
+      <div class="companion-preview" data-preview hidden></div>
       <div class="companion-nickname">
         <label for="companionNickname">캐릭터 닉네임</label>
-        <input id="companionNickname" name="nickname" type="text" required maxlength="30" autocomplete="off">
-        <span class="companion-saved" data-saved>
-          <select aria-label="스케줄러 캐릭터 목록"><option value="">목록</option></select>
-        </span>
+        <div class="companion-nickname-field">
+          <input id="companionNickname" name="nickname" type="text" required maxlength="30" autocomplete="off">
+          <button type="button" data-list-toggle aria-label="저장된 캐릭터 목록" aria-expanded="false" aria-controls="companionSaved">▾</button>
+          <div id="companionSaved" data-saved hidden></div>
+        </div>
+        <button type="submit" data-load>미리보기</button>
       </div>
       <label>방문 캐릭터 닉네임 <input name="visitors" type="text" maxlength="200" placeholder="닉네임을 쉼표로 구분" autocomplete="off"></label>
+      <div class="companion-chair-setting">
+        <div class="companion-chair-preview" role="img" aria-label="의자 미리보기">
+          <div data-chair-preview></div>
+        </div>
+        <label>의자
+          <select name="chair">
+            <option value="03010001">기본 의자 · 03010001</option>
+          </select>
+        </label>
+      </div>
+      <p class="companion-status" data-status role="status"></p>
+      <div class="companion-buttons">
+        <button type="button" data-apply>적용</button>
+        <button type="button" data-summon disabled>소환</button>
+      </div>
+      </form>
+      </div>
+      <section class="companion-form" role="tabpanel" id="companion-map-panel" aria-labelledby="companion-map-tab" data-panel="map" hidden>
+        <div class="companion-map-preview">
+          <img data-map-preview alt="" hidden>
+          <span data-no-map>선택한 맵이 없어요.</span>
+        </div>
       <label>맵
         <select name="map">
           <option value="none">없음</option>
@@ -163,30 +213,25 @@ export function mountCharacterCompanion(trigger){
           <option value="kerning">커닝시티</option>
         </select>
       </label>
-      <div class="companion-chair-setting">
-        <div class="companion-chair-preview" role="img" aria-label="의자 미리보기">
-          <div data-chair-preview></div>
+        <p class="companion-status" data-map-status role="status"></p>
+        <div class="companion-buttons"><button type="button" data-apply-map>적용</button></div>
+      </section>
+      <section class="companion-form" role="tabpanel" id="companion-plaza-panel" aria-labelledby="companion-plaza-tab" data-panel="plaza" hidden>
+        <div class="companion-plaza-room">
+          <strong>광장 1</strong>
+          <span data-plaza-count aria-label="광장 인원">–/10</span>
+          <button type="button" data-plaza-toggle disabled>입장</button>
         </div>
-        <label>의자
-          <select name="chair">
-            <option value="03010001">기본 의자 · 03010001</option>
-          </select>
-        </label>
-      </div>
-      <div class="companion-preview" data-preview hidden></div>
-      <p class="companion-status" data-status role="status"></p>
-      <div class="companion-buttons">
-        <button type="submit" data-load>미리보기</button>
-        <button type="button" data-apply>적용</button>
-        <button type="button" data-summon disabled>소환</button>
-      </div>
-    </form>`;
-  document.body.append(dialog);
-  trigger.setAttribute('aria-haspopup','dialog');
-  trigger.setAttribute('aria-controls',dialog.id);
+        <p class="companion-status" data-plaza-status role="status">저장한 캐릭터로 광장에 입장할 수 있어요.</p>
+      </section>
+    </section>`;
+  document.body.append(settingsPopup);
+  trigger.popoverTargetElement=settingsPopup;
+  trigger.setAttribute('aria-expanded','false');
+  trigger.setAttribute('aria-controls',settingsPopup.id);
 
-  const find=selector=>dialog.querySelector(selector);
-  const form=find('form'), saved=find('[data-saved] select'), nickname=find('[name=nickname]'), apiKey=find('[name=apiKey]');
+  const find=selector=>settingsPopup.querySelector(selector);
+  const form=find('form'), saved=find('[data-saved]'), listToggle=find('[data-list-toggle]'), nickname=find('[name=nickname]'), apiKey=find('[name=apiKey]');
   const preview=find('[data-preview]'), status=find('[data-status]');
   const visitorNames=find('[name=visitors]');
   const mapSelect=find('[name=map]');
@@ -246,8 +291,29 @@ export function mountCharacterCompanion(trigger){
   } catch {}
   ground.dataset.map=selectedMap;
   mapSelect.value=selectedMap;
+  const mapStatus=find('[data-map-status]'), mapPreview=find('[data-map-preview]');
+  function renderMapPreview(){
+    const image=mapImages[mapSelect.value];
+    mapPreview.hidden=!image;
+    find('[data-no-map]').hidden=Boolean(image);
+    if (image) {
+      mapPreview.src=new URL(`../img/map/${image}.png`,import.meta.url).href;
+      mapPreview.alt=mapSelect.selectedOptions[0].textContent;
+    }
+  }
   mapSelect.addEventListener('change',()=>{
-    if (!load.disabled) apply.disabled=false;
+    mapStatus.textContent='';
+    renderMapPreview();
+  });
+  find('[data-apply-map]').addEventListener('click',()=>{
+    if (mapSelect.value!==ground.dataset.map) {
+      ground.dataset.map=mapSelect.value;
+      upperPlatforms.clear();
+      footingPositions.clear();
+      try {localStorage.setItem(mapKey,mapSelect.value);} catch {}
+      alignScene();
+    }
+    mapStatus.textContent='맵을 적용했어요.';
   });
   const load=find('[data-load]'), apply=find('[data-apply]'), summon=find('[data-summon]');
   const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
@@ -266,11 +332,43 @@ export function mountCharacterCompanion(trigger){
   const jumpImages=new WeakMap();
   const ladderImages=new WeakMap();
   const swimImages=new WeakMap();
-  let pose='walk';
-  const canWalk=()=>settings?.visible && frames.length && !document.hidden && !reducedMotion.matches &&
+  let pose='walk', plazaSelf=null;
+  const plazaGuests=new Map();
+  const plazaMessage=makeBalloon();
+  plazaMessage.node.classList.add('companion-plaza-message');
+  const plazaName=makePlazaName('');
+  plazaName.hidden=true;
+  const plaza=mountPlaza(find('[data-panel=plaza]'),()=>settings,{
+    onJoin(){
+      if (settingsPopup.matches(':popover-open') && settingsPopup.dataset.section==='plaza') settingsPopup.hidePopover();
+    },
+    onLeave:leavePlaza,
+    renderMembers:renderPlazaMembers,
+    showChat(id,text){
+      if (id===plazaSelf) plazaMessage.show(text);
+      else plazaGuests.get(id)?.balloon.show(text);
+    }
+  });
+  const selfActor={
+    element:sprite,showFrame,canWalk:()=>canWalk(),
+    get images(){return frames;},
+    get x(){return offset;},set x(value){offset=value;},
+    get animation(){return animation;},set animation(value){animation=value;},
+    rest(delay,swimming){if (swimming) timer=setTimeout(walk,delay);else rest(delay);}
+  };
+  const visitorActor={
+    element:visitor,showFrame:showGuestFrame,canWalk:()=>guestCanWalk(),
+    get images(){return guestFrames;},
+    get x(){return visitorX;},set x(value){visitorX=value;},
+    get animation(){return guestAnimation;},set animation(value){guestAnimation=value;},
+    rest(delay){guestTimer=setTimeout(()=>walk(visitorActor),delay);}
+  };
+  const canWalk=()=>isSummoned() && frames.length && !document.hidden && !reducedMotion.matches &&
     pose==='walk' && menu.hidden;
   const guestCanWalk=()=>!visitor.hidden && !visitorLeaving && !document.hidden && !reducedMotion.matches &&
     visitor.dataset.pose==='walk' && menu.hidden;
+
+  const isSummoned=()=>Boolean(plazaSelf || settings?.visible);
 
   function save(){
     try {localStorage.setItem(settingsKey,JSON.stringify(settings));} catch {}
@@ -300,13 +398,13 @@ export function mountCharacterCompanion(trigger){
     if (menuForVisitor) menu.hidden=true;
   }
   function queueVisit(delay){
-    if (visitTimer || visitPending || !visitor.hidden || sprite.hidden || document.hidden || !settings?.visitors?.length) return;
+    if (plazaSelf || visitTimer || visitPending || !visitor.hidden || sprite.hidden || document.hidden || !settings?.visitors?.length) return;
     visitTimer=setTimeout(showVisitor,delay);
   }
   async function showVisitor(){
     visitTimer=0;
     const names=settings?.visitors;
-    if (sprite.hidden || document.hidden || !names?.length) return;
+    if (plazaSelf || sprite.hidden || document.hidden || !names?.length) return;
     const revision=visitRevision;
     const name=names[Math.floor(Math.random()*names.length)];
     visitPending=true;
@@ -332,7 +430,7 @@ export function mountCharacterCompanion(trigger){
       visitor.hidden=false;
       visitorBalloon.show('잠깐 놀러 왔어!');
       speak('반가워!');
-      guestTimer=setTimeout(()=>walk(true),1800);
+      guestTimer=setTimeout(()=>walk(visitorActor),1800);
       visitTimer=setTimeout(sendVisitorAway,30000);
     } catch {
       // An unavailable guest leaves the summoned character in place.
@@ -354,7 +452,7 @@ export function mountCharacterCompanion(trigger){
     clearTimeout(guestTimer);
     cancelAnimationFrame(guestAnimation);
     guestAnimation=0;
-    settleFooting(visitor);
+    settleFooting(visitorActor);
     setElevation(visitor);
     ropeImages.get(guestFrames)?.frames?.forEach(frame=>{frame.hidden=true;});
     jumpImages.get(guestFrames)?.frames?.forEach(frame=>{frame.hidden=true;});
@@ -384,7 +482,7 @@ export function mountCharacterCompanion(trigger){
     clearTimeout(timer);
     cancelAnimationFrame(animation);
     animation=0;
-    settleFooting(sprite);
+    settleFooting(selfActor);
     setElevation(sprite);
     ropeImages.get(frames)?.frames?.forEach(frame=>{frame.hidden=true;});
     jumpImages.get(frames)?.frames?.forEach(frame=>{frame.hidden=true;});
@@ -400,7 +498,7 @@ export function mountCharacterCompanion(trigger){
     timer=setTimeout(walk,duration);
   }
   function speakIdle(){
-    if (!balloon.node.hidden) return;
+    if (plazaSelf || !balloon.node.hidden) return;
     const index=lastIdle<0 ? Math.floor(Math.random()*idleLines.length) :
       (lastIdle+1+Math.floor(Math.random()*(idleLines.length-1)))%idleLines.length;
     lastIdle=index;
@@ -416,13 +514,14 @@ export function mountCharacterCompanion(trigger){
     const width=document.documentElement.clientWidth;
     character.style.setProperty('--companion-elevation',rise*width/(platforms[ground.dataset.map]?.width ?? width)+'px');
   }
-  function getMovementImages(images,character,cache,actions){
+  function getMovementImages(actor,cache,actions){
+    const {images,element:character}=actor;
     if (!cache.has(images)) {
       const state={frames:null};
       cache.set(images,state);
       Promise.all(actions.map(action=>loadFrame(images[0].src,action))).then(loaded=>{
         state.frames=loaded;
-        if ((character===sprite ? frames : guestFrames)===images) character.append(...loaded);
+        if (actor.images===images && character.isConnected) character.append(...loaded);
       }).catch(()=>{});
     }
     const loaded=cache.get(images).frames;
@@ -440,16 +539,15 @@ export function mountCharacterCompanion(trigger){
     const margin=Math.min(80,width/3);
     return {left:margin,right:width-margin};
   }
-  function placeFooting(character,x){
+  function placeFooting(actor,x){
     const map=platforms[ground.dataset.map];
     const screenX=x*document.documentElement.clientWidth/map.width;
-    if (character===visitor) visitorX=screenX;
-    else offset=screenX;
-    character.style.setProperty('--companion-x',screenX+'px');
+    actor.x=screenX;
+    actor.element.style.setProperty('--companion-x',screenX+'px');
   }
-  function settleFooting(character){
-    const position=footingPositions.get(character);
-    if (position) placeFooting(character,position.x);
+  function settleFooting(actor){
+    const position=footingPositions.get(actor.element);
+    if (position) placeFooting(actor,position.x);
   }
   function planFootingRoute(footing,position,poses,map){
     const {surfaces}=footing;
@@ -486,17 +584,14 @@ export function mountCharacterCompanion(trigger){
     }
     return route.reverse();
   }
-  function walkOnFooting(guest,footing,continuedAt){
-    const character=guest ? visitor : sprite;
-    const images=guest ? guestFrames : frames;
-    const displayFrame=guest ? showGuestFrame : showFrame;
-    const allowed=guest ? guestCanWalk : canWalk;
+  function walkOnFooting(actor,footing,continuedAt){
+    const {element:character,images,showFrame:displayFrame,canWalk:allowed}=actor;
     const mapName=ground.dataset.map;
     const map=platforms[mapName];
     const scale=document.documentElement.clientWidth/map.width;
     let position=footingPositions.get(character);
     if (!position) {
-      const x=(guest ? visitorX : offset)/scale;
+      const x=actor.x/scale;
       const id=footing.start.find(id=>x>=footing.surfaces[id][0] && x<=footing.surfaces[id][2]) ?? footing.start[0];
       const [left,,right]=footing.surfaces[id];
       position={id,x:Math.max(left,Math.min(right,x)),rise:0,route:[]};
@@ -505,13 +600,13 @@ export function mountCharacterCompanion(trigger){
     const current=footing.surfaces[position.id];
     const inWater=surface=>mapName==='nautilus' && surface[1]===map.y && surface[3]===map.y;
     const swimming=inWater(current);
-    const swim=mapName==='nautilus' ? getMovementImages(images,character,swimImages,['A05.0','A05.1']) : null;
+    const swim=mapName==='nautilus' ? getMovementImages(actor,swimImages,['A05.0','A05.1']) : null;
     const riseAt=(surface,x)=>map.y-footingY(surface,x)+(inWater(surface) ? 62 : 0);
     const poses=[
       null,
-      getMovementImages(images,character,jumpImages,['A06.0']),
-      mapName!=='eurel' ? getMovementImages(images,character,ropeImages,['A09.0','A09.1']) : null,
-      mapName!=='eurel' ? getMovementImages(images,character,ladderImages,['A08.0','A08.1']) : null
+      getMovementImages(actor,jumpImages,['A06.0']),
+      mapName!=='eurel' ? getMovementImages(actor,ropeImages,['A09.0','A09.1']) : null,
+      mapName!=='eurel' ? getMovementImages(actor,ladderImages,['A08.0','A08.1']) : null
     ];
     if (!position.route.length) position.route=planFootingRoute(footing,position,poses,map);
     const [id,kind,takeoff,landing]=position.route[0] ??
@@ -535,12 +630,10 @@ export function mountCharacterCompanion(trigger){
     let start=continuedAt;
     function next(){
       const id=requestAnimationFrame(step);
-      if (guest) guestAnimation=id;
-      else animation=id;
+      actor.animation=id;
     }
     function step(now){
-      if (guest) guestAnimation=0;
-      else animation=0;
+      actor.animation=0;
       if (!allowed()) return;
       start ??= now;
       const elapsed=now-start;
@@ -549,7 +642,7 @@ export function mountCharacterCompanion(trigger){
         position.x=x;
         position.rise=riseAt(current,x);
         character.dataset.direction=takeoff<startX ? 'left' : 'right';
-        placeFooting(character,x);
+        placeFooting(actor,x);
         setElevation(character,position.rise+(swimming ? Math.sin(now/190)*9 : 0));
         if (swimming) showSwim(now);
         else displayFrame(1+Math.floor(now/frameMs)%4);
@@ -560,7 +653,7 @@ export function mountCharacterCompanion(trigger){
         const liftProgress=jumping ? progress : progress*progress*(3-2*progress);
         position.x=takeoff;
         position.rise=startRise;
-        placeFooting(character,takeoff+(landing-takeoff)*progress);
+        placeFooting(actor,takeoff+(landing-takeoff)*progress);
         setElevation(character,startRise+(endRise-startRise)*liftProgress+arc);
         swim?.forEach(frame=>{frame.hidden=true;});
         delete character.dataset.swimming;
@@ -570,7 +663,7 @@ export function mountCharacterCompanion(trigger){
       } else {
         const route=position.route.slice(1);
         footingPositions.set(character,{id,x:landing,rise:endRise,route});
-        placeFooting(character,landing);
+        placeFooting(actor,landing);
         setElevation(character);
         motion?.forEach(frame=>{frame.hidden=true;});
         if (inWater(target)) showSwim(now);
@@ -581,41 +674,34 @@ export function mountCharacterCompanion(trigger){
         }
         if (route.length) {
           const nextStart=Math.max(now-32,start+walkTime+moveTime);
-          walkOnFooting(guest,footing,nextStart);
+          walkOnFooting(actor,footing,nextStart);
           return;
         }
         const delay=1000+Math.random()*2200;
-        if (guest) {
-          guestTimer=setTimeout(()=>walk(true),delay);
-        } else if (inWater(target)) {
-          timer=setTimeout(walk,delay);
-        } else rest(delay);
+        actor.rest(delay,inWater(target));
         return;
       }
       next();
     }
     next();
   }
-  function walk(guest=false){
-    const allowed=guest ? guestCanWalk : canWalk;
+  function walk(actor=selfActor){
+    const {element:character,images,showFrame:displayFrame,canWalk:allowed}=actor;
     if (!allowed()) return;
     const footing=mapFooting[ground.dataset.map];
     if (footing) {
-      walkOnFooting(guest,footing);
+      walkOnFooting(actor,footing);
       return;
     }
-    const character=guest ? visitor : sprite;
-    const images=guest ? guestFrames : frames;
-    const displayFrame=guest ? showGuestFrame : showFrame;
-    const from=guest ? visitorX : offset;
+    const from=actor.x;
     const upper=upperPlatforms.get(character);
     const {left,right}=walkBounds(upper);
     const map=ground.dataset.map;
     const width=document.documentElement.clientWidth;
     const scale=width/(platforms[map]?.width ?? width);
-    const jumpingFrames=getMovementImages(images,character,jumpImages,['A06.0']);
+    const jumpingFrames=getMovementImages(actor,jumpImages,['A06.0']);
     const climbingFrames=map==='spiritTree'
-      ? getMovementImages(images,character,ropeImages,['A09.0','A09.1']) : null;
+      ? getMovementImages(actor,ropeImages,['A09.0','A09.1']) : null;
     const rope=climbingFrames && Math.random()<(upper ? .5 : .3)
       ? upper ?? spiritTreeRopes[Math.floor(Math.random()*spiritTreeRopes.length)] : null;
     const jump=!rope && jumpingFrames && Math.random()<.1
@@ -637,19 +723,16 @@ export function mountCharacterCompanion(trigger){
     let start;
     function nextFrame(){
       const id=requestAnimationFrame(step);
-      if (guest) guestAnimation=id;
-      else animation=id;
+      actor.animation=id;
     }
     function step(now){
-      if (guest) guestAnimation=0;
-      else animation=0;
+      actor.animation=0;
       if (!allowed()) return;
       start ??= now;
       const elapsed=now-start;
       const progress=transition ? Math.max(0,Math.min(1,(elapsed-duration)/transitionDuration)) : 0;
       const x=elapsed<duration ? from+(to-from)*elapsed/duration : jump ? to+(landing-to)*progress : to;
-      if (guest) visitorX=x;
-      else offset=x;
+      actor.x=x;
       character.style.setProperty('--companion-x',x+'px');
       if (transition && elapsed>=duration && elapsed<duration+transitionDuration) {
         const arc=jump ? 4*progress*(1-progress)*35 : 0;
@@ -671,10 +754,7 @@ export function mountCharacterCompanion(trigger){
           transitionFrames.forEach(frame=>{frame.hidden=true;});
         }
         const delay=2500+Math.random()*3000;
-        if (guest) {
-          showGuestFrame(0);
-          guestTimer=setTimeout(()=>walk(true),delay);
-        } else rest(delay);
+        actor.rest(delay,false);
       } else {
         displayFrame(1+Math.floor(now/frameMs)%4);
         nextFrame();
@@ -682,11 +762,89 @@ export function mountCharacterCompanion(trigger){
     }
     nextFrame();
   }
+  function stopPlazaGuest(actor){
+    clearTimeout(actor.timer);
+    cancelAnimationFrame(actor.animation);
+    actor.animation=0;
+    settleFooting(actor);
+    setElevation(actor.element);
+    for (const cache of [ropeImages,jumpImages,ladderImages,swimImages]) {
+      cache.get(actor.images)?.frames?.forEach(frame=>{frame.hidden=true;});
+    }
+    delete actor.element.dataset.swimming;
+    actor.showFrame(0);
+  }
+  function syncPlazaGuest(actor){
+    stopPlazaGuest(actor);
+    if (actor.canWalk()) actor.rest(850);
+  }
+  function removePlazaGuest(id,actor){
+    stopPlazaGuest(actor);
+    actor.balloon.hide();
+    upperPlatforms.delete(actor.element);
+    footingPositions.delete(actor.element);
+    actor.element.remove();
+    plazaGuests.delete(id);
+  }
+  function leavePlaza(){
+    if (!plazaSelf) return;
+    plazaSelf=null;
+    plazaName.hidden=true;
+    plazaMessage.hide();
+    for (const [id,actor] of plazaGuests) removePlazaGuest(id,actor);
+    sync();
+  }
+  function renderPlazaMembers(members,self){
+    if (!plazaSelf) {
+      plazaSelf=self;
+      plazaName.textContent=members.find(member=>member.id===self)?.name ?? settings?.name ?? '';
+      plazaName.hidden=false;
+      balloon.hide();
+      stopVisits();
+      sync();
+      if (!frames.length) void restore();
+    }
+    const current=new Set(members.filter(member=>member.id!==self).map(member=>member.id));
+    for (const [id,actor] of plazaGuests) {
+      if (!current.has(id)) removePlazaGuest(id,actor);
+    }
+    for (const member of members) {
+      if (!current.has(member.id) || plazaGuests.has(member.id)) continue;
+      const element=document.createElement('div');
+      element.className='character-companion companion-plaza-guest';
+      element.hidden=true;
+      element.dataset.direction='left';
+      element.dataset.pose='walk';
+      const balloon=makeBalloon();
+      balloon.node.classList.add('companion-plaza-message');
+      balloon.name.textContent=member.name+' :';
+      const {left,right}=walkBounds();
+      const actor={
+        element,balloon,x:left+(right-left)*(.15+Math.random()*.7),animation:0,timer:0,
+        showFrame(index){actor.images?.forEach((frame,i)=>{frame.hidden=i!==index;});},
+        canWalk(){return !element.hidden && !document.hidden && !reducedMotion.matches && menu.hidden;},
+        rest(delay){actor.timer=setTimeout(()=>walk(actor),delay);}
+      };
+      plazaGuests.set(member.id,actor);
+      element.style.setProperty('--companion-x',actor.x+'px');
+      element.append(makePlazaName(member.name),balloon.node);
+      document.body.append(element);
+      preloadFrames(member.image).then(images=>{
+        if (plazaGuests.get(member.id)!==actor) return;
+        actor.images=images;
+        element.prepend(...images);
+        element.hidden=false;
+        syncPlazaGuest(actor);
+      }).catch(()=>{
+        if (plazaGuests.get(member.id)===actor) removePlazaGuest(member.id,actor);
+      });
+    }
+  }
   function sync(){
     stop();
     stopGuestWalk();
     clearInterval(standingTimer);
-    sprite.hidden=!settings?.visible || !frames.length;
+    sprite.hidden=!isSummoned() || !frames.length;
     ground.hidden=sprite.hidden || ground.dataset.map==='none';
     document.body.classList.toggle('companion-visible',!sprite.hidden);
     document.body.dataset.companionMap=sprite.hidden ? '' : ground.dataset.map;
@@ -704,18 +862,22 @@ export function mountCharacterCompanion(trigger){
     if (canWalk()) {
       if (!hasRested) rest(2800);
       else timer=setTimeout(walk,850);
-    } else if (!sprite.hidden && !document.hidden && menu.hidden) {
+    } else if (!plazaSelf && !sprite.hidden && !document.hidden && menu.hidden) {
       scheduleStationarySpeech();
     }
-    if (guestCanWalk()) guestTimer=setTimeout(()=>walk(true),850);
+    if (guestCanWalk()) guestTimer=setTimeout(()=>walk(visitorActor),850);
+    for (const actor of plazaGuests.values()) syncPlazaGuest(actor);
     if (!sprite.hidden && !document.hidden && !reducedMotion.matches) {
       standingTimer=setInterval(()=>{
         const frame=standingFrames[++standingIndex%standingFrames.length];
         if (pose==='walk' && !animation && !('swimming' in sprite.dataset)) showFrame(frame);
         if (!visitor.hidden && visitor.dataset.pose==='walk' && !guestAnimation && !('swimming' in visitor.dataset)) showGuestFrame(frame);
+        for (const actor of plazaGuests.values()) {
+          if (actor.images && !actor.animation && !('swimming' in actor.element.dataset)) actor.showFrame(frame);
+        }
       },330);
     }
-    if (!greeted && !sprite.hidden && !document.hidden) {
+    if (!plazaSelf && !greeted && !sprite.hidden && !document.hidden) {
       greeted=true;
       balloon.show('안녕! 기다렸어!');
     }
@@ -736,11 +898,12 @@ export function mountCharacterCompanion(trigger){
     place();
     sprite.dataset.direction='left';
     balloon.name.textContent=settings.name+' :';
-    sprite.replaceChildren(chair,...images,chairFront,balloon.node,hitbox);
+    plazaMessage.name.textContent=balloon.name.textContent;
+    sprite.replaceChildren(chair,...images,chairFront,balloon.node,plazaMessage.node,plazaName,hitbox);
     sync();
   }
   function speak(text){
-    if (!sprite.hidden && !document.hidden) balloon.show(text);
+    if (!plazaSelf && !sprite.hidden && !document.hidden) balloon.show(text);
   }
   onCompanionSpeech(speak);
   onVoiceStart(({text,channel})=>{
@@ -756,13 +919,13 @@ export function mountCharacterCompanion(trigger){
     sync();
   }
   document.addEventListener('contextmenu',event=>{
-    if (sprite.hidden || dialog.open) return;
+    if (sprite.hidden || settingsPopup.matches(':popover-open')) return;
     const contains=box=>{
       const {left,right,top,bottom}=box.getBoundingClientRect();
       return event.clientX>=left && event.clientX<=right && event.clientY>=top && event.clientY<=bottom;
     };
     const hitsMain=contains(hitbox);
-    const hitsVisitor=!visitor.hidden && !visitorLeaving && contains(visitorHitbox);
+    const hitsVisitor=!plazaSelf && !visitor.hidden && !visitorLeaving && contains(visitorHitbox);
     if (!hitsVisitor && !hitsMain) return;
     menuForVisitor=hitsVisitor && (!hitsMain || Math.abs(event.clientX-visitorX)<Math.abs(event.clientX-offset));
     event.preventDefault();
@@ -776,6 +939,7 @@ export function mountCharacterCompanion(trigger){
     menu.hidden=false;
     stop();
     stopGuestWalk();
+    for (const actor of plazaGuests.values()) stopPlazaGuest(actor);
     menu.style.left=Math.max(4,Math.min(event.clientX,innerWidth-menu.offsetWidth-4))+'px';
     menu.style.top=Math.max(4,Math.min(event.clientY,innerHeight-menu.offsetHeight-4))+'px';
     menu.querySelector('button:not([hidden])').focus({preventScroll:true});
@@ -797,19 +961,19 @@ export function mountCharacterCompanion(trigger){
   document.addEventListener('keydown',event=>{if (event.key==='Escape') closeMenu();});
   async function restore(){
     const current=settings;
-    if (!current?.visible || !current.name) return;
+    if (!isSummoned() || !current?.name) return;
     try {
       const appearance=Date.now()-current.updatedAt<refreshMs ? current :
         await fetchCharacterAppearance(current.name,localStorage.getItem(apiKeyName) || '');
       const images=await preloadFrames(appearance.image);
-      if (settings!==current || !settings.visible) return;
+      if (settings!==current || !isSummoned()) return;
       if (appearance!==current) {
         settings={...current,...appearance,updatedAt:Date.now()};
         save();
       }
       install(images);
     } catch {
-      if (settings===current && dialog.open) status.textContent='저장한 캐릭터를 불러오지 못했어. 미리보기로 다시 연결해 줘.';
+      if (settings===current && settingsPopup.matches(':popover-open')) status.textContent='저장한 캐릭터를 불러오지 못했어. 미리보기로 다시 연결해 줘.';
     }
   }
 
@@ -822,9 +986,63 @@ export function mountCharacterCompanion(trigger){
     load.disabled=false;
     status.textContent='';
   }
-  trigger.addEventListener('click',()=>{
-    loadChairs();
+  function setListOpen(open){
+    saved.hidden=!open;
+    listToggle.setAttribute('aria-expanded',String(open));
+  }
+  const quickMenu=find('.companion-quick-menu');
+  const settingsBody=find('[data-settings-body]');
+  const tabs=[...settingsPopup.querySelectorAll('[role=tab]')];
+  function positionPopup(){
+    const {right,bottom}=trigger.getBoundingClientRect();
+    settingsPopup.style.setProperty('--companion-popup-top',Math.max(8,bottom+8)+window.scrollY+'px');
+    settingsPopup.style.setProperty('--companion-popup-height',Math.max(96,window.innerHeight-bottom-16)+'px');
+    settingsPopup.style.setProperty('--companion-popup-right',Math.max(8,document.documentElement.clientWidth-right)+'px');
+  }
+  function showSection(section){
+    settingsPopup.dataset.section=section;
+    quickMenu.hidden=Boolean(section);
+    settingsBody.hidden=!section;
+    for (const panel of settingsPopup.querySelectorAll('[data-panel]')) panel.hidden=panel.dataset.panel!==section;
+    for (const tab of tabs) {
+      const selected=tab.dataset.section===section;
+      tab.setAttribute('aria-selected',String(selected));
+      tab.tabIndex=selected ? 0 : -1;
+    }
+    if (section==='character') loadChairs();
+    if (section==='map') renderMapPreview();
+    if (section==='plaza') plaza.show();
+    else plaza.hide();
+    setListOpen(false);
+  }
+  for (const tab of tabs) tab.addEventListener('click',()=>showSection(tab.dataset.section));
+  find('[role=tablist]').addEventListener('keydown',event=>{
+    const current=tabs.indexOf(event.target);
+    if (current<0) return;
+    const next={ArrowLeft:(current+tabs.length-1)%tabs.length,ArrowRight:(current+1)%tabs.length,Home:0,End:tabs.length-1}[event.key];
+    if (next===undefined) return;
+    event.preventDefault();
+    showSection(tabs[next].dataset.section);
+    tabs[next].focus();
+  });
+  for (const item of quickMenu.querySelectorAll('button')) {
+    item.addEventListener('click',()=>{
+      showSection(item.dataset.openSection);
+      tabs.find(tab=>tab.dataset.section===item.dataset.openSection).focus();
+    });
+  }
+  window.addEventListener('resize',positionPopup);
+  settingsPopup.addEventListener('beforetoggle',event=>{
+    const opening=event.newState==='open';
+    trigger.setAttribute('aria-expanded',String(opening));
+    if (!opening) {
+      clearPreview();
+      plaza.hide();
+      return;
+    }
+    positionPopup();
     mapSelect.value=ground.dataset.map;
+    mapStatus.textContent='';
     if (chairs) {
       chairSelect.value=selectedChair;
       renderChairPreview();
@@ -832,27 +1050,36 @@ export function mountCharacterCompanion(trigger){
     closeMenu();
     clearPreview();
     listed=getSchedulerCharacters();
-    saved.replaceChildren(new Option('목록',''),
-      ...listed.map(character=>new Option(character.name,character.name)));
-    find('[data-saved]').hidden=!listed.length;
+    saved.replaceChildren(...listed.map(character=>{
+      const option=document.createElement('button');
+      option.type='button';
+      option.textContent=character.name;
+      option.addEventListener('click',()=>{
+        nickname.value=character.name;
+        setListOpen(false);
+        clearPreview();
+        nickname.focus();
+      });
+      return option;
+    }));
+    listToggle.hidden=!listed.length;
     nickname.value=settings?.name ?? '';
     visitorNames.value=settings?.visitors?.join(', ') ?? '';
     apiKey.value=localStorage.getItem(apiKeyName) || '';
     sync();
-    dialog.showModal();
+    showSection('');
   });
-  find('[data-close]').addEventListener('click',()=>dialog.close());
-  dialog.addEventListener('click',event=>{
-    if (event.target!==dialog) return;
-    const {left,right,top,bottom}=dialog.getBoundingClientRect();
-    if (event.clientX<left || event.clientX>right || event.clientY<top || event.clientY>bottom) dialog.close();
+  find('[data-close]').addEventListener('click',()=>settingsPopup.hidePopover());
+  settingsPopup.addEventListener('click',event=>{
+    if (!find('.companion-nickname-field').contains(event.target)) setListOpen(false);
   });
-  dialog.addEventListener('close',clearPreview);
-  saved.addEventListener('change',()=>{
-    if (saved.value) nickname.value=saved.value;
-    saved.value='';
-    clearPreview();
+  settingsPopup.addEventListener('keydown',event=>{
+    if (event.key!=='Escape' || saved.hidden) return;
+    event.preventDefault();
+    setListOpen(false);
+    listToggle.focus();
   });
+  listToggle.addEventListener('click',()=>setListOpen(saved.hidden));
   nickname.addEventListener('input',clearPreview);
   apiKey.addEventListener('input',clearPreview);
   visitorNames.addEventListener('input',()=>{if (!load.disabled) apply.disabled=false;});
@@ -863,7 +1090,7 @@ export function mountCharacterCompanion(trigger){
     sync();
     if (settings.visible) {
       if (!frames.length) void restore();
-      dialog.close();
+      settingsPopup.hidePopover();
     }
   });
   async function loadCharacter(showPreview){
@@ -908,24 +1135,15 @@ export function mountCharacterCompanion(trigger){
     const savedKey=localStorage.getItem(apiKeyName) || '';
     const visitors=[...new Set(visitorNames.value.split(/[,，\n]/).map(value=>value.trim()).filter(Boolean))]
       .filter(visitorName=>visitorName!==name).slice(0,10);
-    const mapChanged=mapSelect.value!==ground.dataset.map;
     const chairChanged=chairs?.[chairSelect.value] && chairSelect.value!==selectedChair;
-    if (mapChanged) {
-      ground.dataset.map=mapSelect.value;
-      upperPlatforms.clear();
-      footingPositions.clear();
-      try {localStorage.setItem(mapKey,mapSelect.value);} catch {}
-      alignScene();
-    }
     if (chairChanged) {
       selectedChair=chairSelect.value;
       try {localStorage.setItem(chairKey,selectedChair);} catch {}
       renderChair();
     }
-    if ((mapChanged || chairChanged) && (!name || (name===settings?.name && keyInput===savedKey &&
+    if (chairChanged && (!name || (name===settings?.name && keyInput===savedKey &&
         JSON.stringify(visitors)===JSON.stringify(settings.visitors ?? [])))) {
-      status.textContent=mapChanged && chairChanged ? '맵과 의자를 적용했어.' :
-        mapChanged ? '맵을 적용했어.' : '의자를 적용했어.';
+      status.textContent='의자를 적용했어.';
       return;
     }
     const existing=name===settings?.name && frames.length && keyInput===savedKey
@@ -935,6 +1153,7 @@ export function mountCharacterCompanion(trigger){
     if (!selected) return;
     const {appearance,images,key}=selected;
     const sameCharacter=appearance.name===settings?.name;
+    if (plazaSelf && !sameCharacter) plaza.exit();
     settings={...appearance,visitors,
       visible:sameCharacter && Boolean(settings.visible),updatedAt:Date.now()};
     save();
@@ -968,6 +1187,11 @@ export function mountCharacterCompanion(trigger){
       const guestBounds=walkBounds(upperPlatforms.get(visitor));
       visitorX=Math.max(guestBounds.left,Math.min(guestBounds.right,visitorX));
       visitor.style.setProperty('--companion-x',visitorX+'px');
+    }
+    for (const actor of plazaGuests.values()) {
+      const bounds=walkBounds(upperPlatforms.get(actor.element));
+      actor.x=Math.max(bounds.left,Math.min(bounds.right,actor.x));
+      actor.element.style.setProperty('--companion-x',actor.x+'px');
     }
     place();
     sync();
