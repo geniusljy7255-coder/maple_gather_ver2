@@ -174,8 +174,8 @@ export function mountCharacterCompanion(trigger){
         <label for="companionNickname">캐릭터 닉네임</label>
         <div class="companion-nickname-field">
           <input id="companionNickname" name="nickname" type="text" required maxlength="30" autocomplete="off">
-          <button type="button" data-list-toggle aria-label="저장된 캐릭터 목록" aria-expanded="false" aria-controls="companionSaved">▾</button>
-          <div id="companionSaved" data-saved hidden></div>
+          <button type="button" data-list-toggle aria-label="저장된 캐릭터 목록" aria-expanded="false" aria-controls="companionSaved"><span class="companion-select-arrow" aria-hidden="true">▾</span></button>
+          <div id="companionSaved" data-saved popover="manual" hidden></div>
         </div>
         <button type="submit" data-load>미리보기</button>
       </div>
@@ -184,11 +184,16 @@ export function mountCharacterCompanion(trigger){
         <div class="companion-chair-preview" role="img" aria-label="의자 미리보기">
           <div data-chair-preview></div>
         </div>
-        <label>의자
-          <select name="chair">
+        <div class="companion-chair-picker">
+          <span id="companionChairLabel">의자</span>
+          <select name="chair" hidden aria-hidden="true" tabindex="-1">
             <option value="03010001">기본 의자 · 03010001</option>
           </select>
-        </label>
+          <button type="button" data-chair-toggle aria-labelledby="companionChairLabel companionChairValue" aria-haspopup="listbox" aria-expanded="false" aria-controls="companionChairs">
+            <span id="companionChairValue">기본 의자 · 03010001</span><span class="companion-select-arrow" aria-hidden="true">▾</span>
+          </button>
+          <div id="companionChairs" role="listbox" aria-labelledby="companionChairLabel" popover="manual" hidden></div>
+        </div>
       </div>
       <p class="companion-status" data-status role="status"></p>
       <div class="companion-buttons">
@@ -236,6 +241,88 @@ export function mountCharacterCompanion(trigger){
   const visitorNames=find('[name=visitors]');
   const mapSelect=find('[name=map]');
   const chairSelect=find('[name=chair]'), chairPreview=find('[data-chair-preview]');
+  const chairToggle=find('[data-chair-toggle]'), chairList=find('#companionChairs');
+  const chairValue=find('#companionChairValue'), chairPicker=find('.companion-chair-picker');
+  function positionChoiceList(list,anchor){
+    const rect=anchor.getBoundingClientRect();
+    const width=Math.min(rect.width,window.innerWidth-16);
+    const below=window.innerHeight-rect.bottom-12;
+    const above=rect.top-12;
+    const upward=below<80 && above>below;
+    const height=Math.max(0,Math.min(180,upward ? above : below));
+    list.style.width=width+'px';
+    list.style.left=Math.max(8,Math.min(rect.left,window.innerWidth-width-8))+'px';
+    list.style.maxHeight=height+'px';
+    list.style.top=upward ? 'auto' : rect.bottom+4+'px';
+    list.style.bottom=upward ? window.innerHeight-rect.top+4+'px' : 'auto';
+  }
+  function toggleChoiceList(list,anchor,open){
+    if (open) {
+      list.hidden=false;
+      positionChoiceList(list,anchor);
+      if (!list.matches(':popover-open')) list.showPopover();
+    } else {
+      if (list.matches(':popover-open')) list.hidePopover();
+      list.hidden=true;
+    }
+  }
+  function repositionChoiceLists(){
+    if (!chairList.hidden) positionChoiceList(chairList,chairToggle);
+    if (!saved.hidden) positionChoiceList(saved,nickname);
+  }
+  window.addEventListener('resize',repositionChoiceLists);
+  window.addEventListener('scroll',event=>{
+    if (event.target!==chairList && event.target!==saved) repositionChoiceLists();
+  },true);
+  function setChairListOpen(open){
+    toggleChoiceList(chairList,chairToggle,open);
+    chairToggle.setAttribute('aria-expanded',String(open));
+    if (open) setListOpen(false);
+  }
+  function syncChairPicker(){
+    chairValue.textContent=chairSelect.selectedOptions[0]?.textContent ?? '';
+    chairList.replaceChildren(...[...chairSelect.options].map(option=>{
+      const item=document.createElement('button');
+      item.type='button';
+      item.setAttribute('role','option');
+      item.setAttribute('aria-selected',String(option.selected));
+      item.tabIndex=-1;
+      item.textContent=option.textContent;
+      item.addEventListener('click',()=>{
+        chairSelect.value=option.value;
+        chairSelect.dispatchEvent(new Event('change'));
+        setChairListOpen(false);
+        chairToggle.focus();
+      });
+      return item;
+    }));
+  }
+  chairToggle.addEventListener('click',()=>setChairListOpen(chairList.hidden));
+  chairPicker.addEventListener('keydown',event=>{
+    if (event.key==='Escape' && !chairList.hidden) {
+      event.preventDefault();
+      event.stopPropagation();
+      setChairListOpen(false);
+      chairToggle.focus();
+      return;
+    }
+    if (event.key==='Tab') {setChairListOpen(false);return;}
+    if (!['ArrowDown','ArrowUp','Home','End'].includes(event.key)) return;
+    event.preventDefault();
+    const items=[...chairList.children];
+    if (!items.length) return;
+    const index=items.indexOf(document.activeElement);
+    let next=index<0 ? Math.max(0,items.findIndex(item=>item.getAttribute('aria-selected')==='true'))
+      : (index+(event.key==='ArrowUp' ? -1 : 1)+items.length)%items.length;
+    if (event.key==='Home') next=0;
+    if (event.key==='End') next=items.length-1;
+    setChairListOpen(true);
+    items[next].focus();
+  });
+  chairPicker.addEventListener('focusout',event=>{
+    if (!chairPicker.contains(event.relatedTarget)) setChairListOpen(false);
+  });
+  syncChairPicker();
   let selectedChair=defaultChair, chairs, chairRequest;
   try {selectedChair=localStorage.getItem(chairKey) || defaultChair;} catch {}
 
@@ -273,6 +360,7 @@ export function mountCharacterCompanion(trigger){
         new Option(entry.name || (id===defaultChair ? '기본 의자 · '+id : id),id)));
       if (!Object.hasOwn(chairs,selectedChair)) selectedChair=defaultChair;
       chairSelect.value=selectedChair;
+      syncChairPicker();
       renderChair();
       renderChairPreview();
     }).catch(()=>{
@@ -280,6 +368,7 @@ export function mountCharacterCompanion(trigger){
     });
   }
   chairSelect.addEventListener('change',()=>{
+    syncChairPicker();
     renderChairPreview();
     if (!load.disabled) apply.disabled=false;
   });
@@ -987,7 +1076,8 @@ export function mountCharacterCompanion(trigger){
     status.textContent='';
   }
   function setListOpen(open){
-    saved.hidden=!open;
+    if (open) setChairListOpen(false);
+    toggleChoiceList(saved,nickname,open);
     listToggle.setAttribute('aria-expanded',String(open));
   }
   const quickMenu=find('.companion-quick-menu');
@@ -1014,6 +1104,7 @@ export function mountCharacterCompanion(trigger){
     if (section==='plaza') plaza.show();
     else plaza.hide();
     setListOpen(false);
+    setChairListOpen(false);
   }
   for (const tab of tabs) tab.addEventListener('click',()=>showSection(tab.dataset.section));
   find('[role=tablist]').addEventListener('keydown',event=>{
@@ -1033,9 +1124,12 @@ export function mountCharacterCompanion(trigger){
   }
   window.addEventListener('resize',positionPopup);
   settingsPopup.addEventListener('beforetoggle',event=>{
+    if (event.target!==settingsPopup) return;
     const opening=event.newState==='open';
     trigger.setAttribute('aria-expanded',String(opening));
     if (!opening) {
+      setListOpen(false);
+      setChairListOpen(false);
       clearPreview();
       plaza.hide();
       return;
@@ -1045,6 +1139,7 @@ export function mountCharacterCompanion(trigger){
     mapStatus.textContent='';
     if (chairs) {
       chairSelect.value=selectedChair;
+      syncChairPicker();
       renderChairPreview();
     }
     closeMenu();
@@ -1070,7 +1165,8 @@ export function mountCharacterCompanion(trigger){
     showSection('');
   });
   find('[data-close]').addEventListener('click',()=>settingsPopup.hidePopover());
-  settingsPopup.addEventListener('click',event=>{
+  document.addEventListener('click',event=>{
+    if (!chairPicker.contains(event.target)) setChairListOpen(false);
     if (!find('.companion-nickname-field').contains(event.target)) setListOpen(false);
   });
   settingsPopup.addEventListener('keydown',event=>{
@@ -1094,7 +1190,10 @@ export function mountCharacterCompanion(trigger){
     }
   });
   async function loadCharacter(showPreview){
-    clearPreview();
+    // Keep the displayed preview until its replacement has finished decoding.
+    request++;
+    candidate=null;
+    status.textContent='';
     const version=request,name=nickname.value.trim(),key=apiKey.value.trim();
     if (!name) {status.textContent='닉네임을 입력해 줘.';return;}
     const existing=listed.find(character=>character.name===name && character.image);
@@ -1110,7 +1209,7 @@ export function mountCharacterCompanion(trigger){
         image.alt=appearance.name;
         await image.decode();
         if (version!==request) return null;
-        preview.replaceChildren(image);
+        if (preview.firstElementChild?.src!==image.src) preview.replaceChildren(image);
         preview.hidden=false;
       }
       if (version!==request) return null;

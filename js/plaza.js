@@ -148,6 +148,12 @@ export function mountPlaza(panel,getCharacter,{onJoin,onLeave,renderMembers,show
       leave(full);
       if (!panel.hidden && panel.closest(':popover-open')) show();
     });
+    stream.addEventListener('duplicate',event=>{
+      if (connection!==stream) return;
+      updateCount(JSON.parse(event.data));
+      leave('이미 광장에 접속 중인 캐릭터예요. 기존 접속을 종료한 뒤 다시 입장해 주세요.');
+      if (!panel.hidden && panel.closest(':popover-open')) show();
+    });
     stream.addEventListener('error',()=>{
       if (connection!==stream) return;
       if (stream.readyState===PlazaConnection.CLOSED) {

@@ -8,11 +8,16 @@ let saved=[];
 try { const v=JSON.parse(localStorage.getItem(HISTORY_KEY)||'[]');
   if(Array.isArray(v)) saved=v.filter(r=>Number.isFinite(r.startedAt)&&Number.isFinite(r.endedAt)&&
     (r.gainPercent===null||Number.isFinite(r.gainPercent))&&Number.isInteger(r.fragments)&&r.fragments>=0&&r.endedAt>=r.startedAt&&
-    (!r.startExp||(r.startExp.percent===null||Number.isFinite(r.startExp.percent)))&&(!r.endExp||(r.endExp.percent===null||Number.isFinite(r.endExp.percent)))).slice(0,10);
+    (!r.startExp||(r.startExp.percent===null||Number.isFinite(r.startExp.percent)))&&(!r.endExp||(r.endExp.percent===null||Number.isFinite(r.endExp.percent))));
 } catch {}
 export const state={hunt:createHuntModel(saved),collect:{sec:sanitizeSec(localStorage.getItem(LS_SEC)),repeat:true,deadline:0,pausedLeft:null,enabled:localStorage.getItem(LS_ENABLED)!=='0'},
   rune:createRuneState(),booster:{deadline:0,sample:null,confirmedAt:0},vision:{exp:null,fragments:null,assets:[],error:'',lastAt:0}};
 function persist(){try{localStorage.setItem(HISTORY_KEY,JSON.stringify(state.hunt.history));state.hunt.storageError=false;}catch{state.hunt.storageError=true;}}
+export function deleteHuntRecord(record){
+  if(!state.hunt.history.includes(record)) return;
+  state.hunt.history=state.hunt.history.filter(item=>item!==record);
+  persist();
+}
 export function startHunt(now=Date.now(),restarting=false) {
   if(state.hunt.running || state.hunt.pausedAt !== null) stopHunt(now,'다시 측정');
   beginHunt(state.hunt,now);

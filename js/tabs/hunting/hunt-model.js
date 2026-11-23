@@ -3,7 +3,7 @@ export function createHuntModel(history = []) {
   return { running:false, manuallyEnded:false, pausedAt:null, pausedMs:0, startedAt:0, endedAt:0, lastGainAt:0,
     startExp:null, currentExp:null, gainPercent:0, gainRaw:"0", fragments:0,
     fragmentStart:null, fragmentBaseline:null, latestFragments:null, lastExp:null, percentAnchor:null,
-    history:history.slice(0,10), storageError:false, reason:'경험치 증가 대기' };
+    history:[...history], storageError:false, reason:'경험치 증가 대기' };
 }
 const copy = e => e ? {percent:e.percent,level:e.level ?? null,raw:e.raw ?? null} : null;
 export function beginHunt(m, now, baseline = m.lastExp) {
@@ -17,7 +17,7 @@ export function finishHunt(m, now, reason='일시정지') {
   const record={startedAt:m.startedAt,endedAt:now,durationMs:Math.max(0,now-m.startedAt-m.pausedMs),startExp:copy(m.startExp),
     endExp:copy(m.currentExp ? {...m.currentExp,percent:m.currentExp.percent ?? m.percentAnchor?.percent ?? null} : null),gainPercent:Number.isFinite(m.startExp?.percent)&&Number.isFinite(m.percentAnchor?.percent)?Number(m.gainPercent.toFixed(4)):null,fragments:m.fragments};
   m.running=false;m.pausedAt=null;m.endedAt=now;m.reason=reason+' · 다음 경험치 증가 시 새 기록';
-  m.history=[record,...m.history].slice(0,10);
+  m.history=[record,...m.history];
   return record;
 }
 function experienceDelta(prev, next) {

@@ -154,11 +154,11 @@ const html=`
   <h2 class="text-sm font-bold">패턴 도우미</h2>
   <div class="flex flex-wrap items-center justify-between gap-2">
     <div class="flex gap-2">
-      <button type="button" class="${button}" data-pattern-boss="off" aria-pressed="false">사용 안 함</button>
-      <button type="button" class="${accentButton}" data-pattern-boss="karing" aria-pressed="true" aria-controls="karing-pattern-panel">카링</button>
+      <button type="button" class="${accentButton}" data-pattern-boss="off" aria-pressed="true">사용 안 함</button>
+      <button type="button" class="${button}" data-pattern-boss="karing" aria-pressed="false" aria-controls="karing-pattern-panel">카링</button>
       <button type="button" class="${button}" data-pattern-boss="kalos" aria-pressed="false" aria-controls="kalos-pattern-panel">칼로스</button>
     </div>
-    <div data-karing-controls><div class="flex flex-wrap items-center gap-2 [&_button]:h-8">
+    <div data-karing-controls hidden><div class="flex flex-wrap items-center gap-2 [&_button]:h-8">
       <label class="flex items-center gap-1.5 whitespace-nowrap text-xs">게이지 알림
         <input type="number" min="5" max="495" step="5" value="100" class="${input} h-8 w-16" data-karing-threshold>
       </label>
@@ -166,7 +166,7 @@ const html=`
     </div></div>
     <button type="button" data-kalos-area hidden></button>
   </div>
-  <div id="karing-pattern-panel" class="space-y-2">
+  <div id="karing-pattern-panel" class="space-y-2" hidden>
     <div class="grid gap-2" data-karing-gauges></div>
     <p class="hint font-bold" data-karing-recommendation hidden></p>
   </div>

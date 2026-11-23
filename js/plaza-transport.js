@@ -35,7 +35,7 @@ export class PlazaConnection extends EventTarget {
         p_cursor:this.cursor
       },this.controller.signal);
       if (this.readyState===2) return;
-      if (data.error==='full') {this.emit('full',data);this.close();return;}
+      if (data.error==='full' || data.error==='duplicate') {this.emit(data.error,data);this.close();return;}
       if (data.error) throw new Error(data.error);
       this.readyState=1;
       const first=!this.joined;

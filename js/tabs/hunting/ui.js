@@ -1,3 +1,4 @@
+import {calendarHtml,mountHuntCalendar} from './calendar.js';
 import { status as detectorStatus } from './detector.js';
 import {bindTimerFormat,timerFormatControl} from './timer-format-control.js';
 import {alarmRecordingControl,bindAlarmRecording} from '../../core/alarm-recordings.js';
@@ -63,14 +64,16 @@ export const html = `
   </div>
 </div>
 
-<div class="panel">
+<div class="hunt-status-collection">
+<div class="panel hunt-status-panel">
   <h2 class="panel-h">
     <span><span class="dot"></span>사냥 현황</span>
     <div class="flex flex-wrap justify-end gap-2"><button type="button" style="${HUNT_BUTTON_SIZE}" id="huntStart" class="${BTN_PRIMARY}">측정 시작</button><button type="button" style="${HUNT_BUTTON_SIZE}" id="huntToggle" class="${BTN_DANGER}">일시정지</button><button type="button" style="${HUNT_BUTTON_SIZE}" id="huntRestart" class="${BTN_PRIMARY}">다시 측정</button><button type="button" style="${HUNT_BUTTON_SIZE}" id="huntStop" class="${BTN_GHOST}">측정 종료</button></div>
   </h2>
+  <div class="hunt-status-content">
   <div class="grid grid-cols-2 gap-3">
     ${dashCard('사냥 시간', '<div id="huntTime" class="min-h-10 text-3xl leading-10 font-black tabular-nums text-indigo-600">00:00:00</div><div class="min-h-4" aria-hidden="true"></div>')}
-    ${dashCard(iconLabel('솔 에르다 조각',new URL('../../../icon/솔_에르다_조각.png',import.meta.url).href)+' <span class="hint ml-1">(약 10초마다 갱신)</span>', '<div id="huntFragments" class="min-h-10 text-3xl leading-10 font-black tabular-nums text-indigo-600">—</div><div id="huntFragmentsDetail" class="hint min-h-4"></div>')}
+    ${dashCard('<span class="hunt-fragments-label">'+iconLabel('솔 에르다 조각',new URL('../../../icon/솔_에르다_조각.png',import.meta.url).href)+' <span class="hint">(약 10초마다 갱신)</span></span>', '<div id="huntFragments" class="min-h-10 text-3xl leading-10 font-black tabular-nums text-indigo-600">—</div><div id="huntFragmentsDetail" class="hint min-h-4"></div>')}
   </div>
   <div class="card space-y-2">
     <div class="flex flex-wrap items-baseline justify-between gap-2">
@@ -81,26 +84,16 @@ export const html = `
     </div>
     <div id="huntExpDetail" class="hint"></div>
   </div>
-  <details class="card">
-    <summary class="cursor-pointer text-sm font-bold">최근 사냥 기록</summary>
-    <div class="mt-2 overflow-x-auto">
-      <table class="w-full text-left text-xs tabular-nums">
-        <thead class="border-b border-slate-200 text-slate-600"><tr>
-          ${['시작 시간','사냥 시간','경험치','솔 에르다 조각'].map(label=>`<th scope="col" class="whitespace-nowrap px-2 py-2">${label}</th>`).join('')}
-        </tr></thead>
-        <tbody id="huntHistory" class="divide-y divide-slate-100"></tbody>
-      </table>
-    </div>
-    <p id="huntHistoryWarn" class="hint mt-1"></p>
-  </details>
+  <p class="hint">경험치 증가 시 자동 측정 시작</p>
+  </div>
 </div>
 
-<div class="panel">
+<div class="panel hunt-collection-panel">
   <h2 class="panel-h">
     <span><span class="dot"></span>아이템 회수</span>
-    <span class="hint">경험치 증가 시 시작 · 일시정지 시 중단</span>
+    <label class="flex shrink-0 items-center gap-1 text-xs"><input id="collectEnabled" type="checkbox" class="cb">타이머 사용</label>
   </h2>
-  <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,18rem)]">
+  <div class="hunt-collection-content">
     <div class="card text-center">
       <div class="label mb-1">알림까지 남은 시간</div>
       <div id="collectLeft" class="text-3xl font-black text-slate-800">--:--</div>
@@ -109,7 +102,6 @@ export const html = `
     <div class="card space-y-2">
       <div class="flex items-center justify-between gap-2">
         <label class="label" for="collectSec">알림 시간 (초)</label>
-        <label class="flex shrink-0 items-center gap-1 text-xs"><input id="collectEnabled" type="checkbox" class="cb">타이머 사용</label>
       </div>
       <div class="flex items-center gap-2">
         <input type="number" id="collectSec" min="10" max="600" class="input !h-9 w-full min-w-0 flex-1 !py-0">
@@ -120,12 +112,16 @@ export const html = `
   </div>
 </div>
 
+</div>
+
+${calendarHtml}
+
 <div class="panel">
   <h2 class="panel-h"><span><span class="dot"></span>룬 · 설치기</span><div class="flex flex-wrap items-center justify-end gap-2">
     ${timerFormatControl('huntTimerFormat')}
     <button id="huntAddInstaller" class="${BTN_GHOST}">설치기 추가하기</button>
   </div></h2>
-  <div id="huntInstallerGrid" class="grid gap-3 md:grid-cols-3">
+  <div id="huntInstallerGrid" class="grid gap-3">
     <div class="card space-y-2 text-center">
       <div class="label">${iconLabel("룬",installerIcon("rune-normal"))}</div>
       <div id="runeState" class="text-sm font-bold">미니맵 탐색 중</div>
@@ -455,6 +451,7 @@ async function togglePip() {
 }
 
 export function bind() {
+  renderCalendar=mountHuntCalendar(document,()=>S.state.hunt,S.deleteHuntRecord);
   bindAlarmRecording($('huntAlarmRecording'),'hunt');
   bindTimerFormat($('huntTimerFormat'));
   bindJobInstallers();
@@ -570,8 +567,7 @@ export function render(now) {
   renderPip(now);
 }
 
-let renderedHistory;
-const dateTime=new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:"h23"});
+let renderCalendar=()=>{};
 const percent=value=>value==null?'미확인':Number(value).toFixed(4)+'%';
 function renderMeasurements(now){
   const h=S.state.hunt,r=S.state.rune,v=S.state.vision,sharing=getInfo().active;
@@ -618,31 +614,5 @@ function renderMeasurements(now){
   const runeLabel = rune.label.endsWith('버프 적용 중') ? '룬 버프 적용 중' : rune.label;
   setText('runeState', sharing ? runeLabel : '화면 공유 대기');
   setText('runeRemaining',!sharing?'':rune.seconds!==null?formatBuffTime(rune.seconds*1000,rune.approx):(rune.detail||''));
-  setText('huntHistoryWarn',h.storageError?'브라우저 저장에 실패했습니다. 현재 기록은 이 화면에서만 유지됩니다.':'최근 10개 저장');
-  if(h.history!==renderedHistory){
-    renderedHistory=h.history;
-    const host=$('huntHistory');host.replaceChildren();
-    if (!h.history.length) {
-      const row = document.createElement('tr');
-      const cell = document.createElement('td');
-      cell.colSpan = 4;
-      cell.className = 'px-2 py-2 text-slate-500';
-      cell.textContent = '완료된 사냥 기록이 없습니다.';
-      row.append(cell);
-      host.append(row);
-    }
-    for (const item of h.history) {
-      const parts = Object.fromEntries(dateTime.formatToParts(item.startedAt).map(part => [part.type, part.value]));
-      const started = `${parts.year}. ${parts.month}. ${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
-      const row = document.createElement('tr');
-      const experience = item.gainPercent === null ? '미확인' : '+' + item.gainPercent.toFixed(4) + '%p';
-      for (const value of [started, formatHMS(item.durationMs ?? (item.endedAt - item.startedAt)), experience, item.fragments + '개']) {
-        const cell = document.createElement('td');
-        cell.className = 'whitespace-nowrap px-2 py-2';
-        cell.textContent = value;
-        row.append(cell);
-      }
-      host.append(row);
-    }
-  }
+  renderCalendar();
 }

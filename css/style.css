@@ -637,7 +637,7 @@ body.companion-visible #page { position: relative; z-index: 1; }
 .companion-nickname-field { position: relative; min-width: 0; }
 .companion-nickname-field input { width: 100%; }
 .companion-nickname-field:has([data-list-toggle]:not([hidden])) input { padding-right: 38px; }
-.companion-form [data-list-toggle] {
+.companion-form button[data-list-toggle] {
   position: absolute;
   inset: 1px 1px 1px auto;
   width: 34px;
@@ -645,10 +645,38 @@ body.companion-visible #page { position: relative; z-index: 1; }
   border: 0;
   background: transparent;
 }
+.companion-select-arrow { display: inline-block; transition: transform .15s ease; }
+.companion-form button[aria-expanded="true"] > .companion-select-arrow { transform: rotate(180deg); }
+.companion-chair-picker { position: relative; display: grid; gap: 4px; min-width: 0; font-size: .875rem; font-weight: 700; }
+.companion-form button[data-chair-toggle] { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; text-align: left; }
+#companionChairValue { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#companionChairs {
+  position: fixed;
+  inset: auto;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  color: var(--ink);
+  z-index: 3;
+  display: grid;
+  max-height: 150px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 12%);
+}
+#companionChairs[hidden] { display: none; }
+.companion-form #companionChairs button { border: 0; border-radius: 0; text-align: left; background: transparent; }
+.companion-form #companionChairs button:is(:hover, :focus-visible, [aria-selected="true"]) { background: var(--accent-soft); }
 .companion-form [data-saved] {
-  position: absolute;
+  position: fixed;
   z-index: 2;
-  inset: calc(100% + 4px) 0 auto;
+  inset: auto;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  color: var(--ink);
   display: grid;
   max-height: 150px;
   overflow: auto;
@@ -863,6 +891,78 @@ body.companion-visible #page { position: relative; z-index: 1; }
   box-shadow: 0 0 0 1px var(--accent);
 }
 
+.hunt-status-collection {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  align-items: stretch;
+  gap: 16px;
+}
+.hunt-status-collection > .panel { min-width: 0; margin: 0; display: grid; grid-template-rows: subgrid; grid-row: span 2; row-gap: 0; }
+.hunt-status-collection > .panel > * { margin-top: 0; margin-bottom: 0; }
+.hunt-status-collection .panel-h { flex-wrap: wrap; align-items: center; min-height: 36px; }
+.hunt-status-collection .panel-h > span:first-child { flex-shrink: 0; }
+.hunt-status-content { display: grid; gap: 16px; align-content: start; min-width: 0; }
+.hunt-fragments-label { display: flex; align-items: center; justify-content: center; gap: 4px; }
+.hunt-fragments-label > * { flex-shrink: 0; }
+#huntInstallerGrid { grid-template-columns: repeat(3,minmax(0,1fr)); }
+@media (max-width: 900px) {
+  #huntInstallerGrid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .hunt-fragments-label { flex-direction: column; }
+}
+.hunt-collection-content { display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 12px; flex: 1; }
+.hunt-collection-content > .card:first-child { display: flex; flex-direction: column; justify-content: center; }
+.hunt-calendar { --hunt-calendar-padding: 1rem; }
+@media (min-width: 768px) {
+  .hunt-calendar { --hunt-calendar-padding: 1.25rem; }
+}
+.hunt-calendar > summary {
+  cursor: pointer;
+  list-style: none;
+  margin: calc(-1 * var(--hunt-calendar-padding));
+  padding: var(--hunt-calendar-padding);
+  border-radius: inherit;
+}
+.hunt-calendar > summary::-webkit-details-marker { display: none; }
+.hunt-calendar-disclosure { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: .8rem; }
+.hunt-calendar-chevron { display: inline-block; font-size: 1.25rem; transition: transform .15s ease; }
+.hunt-calendar[open] .hunt-calendar-chevron { transform: rotate(180deg); }
+.hunt-calendar:not([open]) .hunt-calendar-close-label, .hunt-calendar[open] .hunt-calendar-open-label { display: none; }
+.hunt-calendar-nav { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); align-items: center; gap: 8px; }
+.hunt-calendar-month-navigation { grid-column: 2; display: flex; align-items: center; gap: 12px; }
+#huntCalendarToday { justify-self: end; white-space: nowrap; }
+.hunt-calendar-nav button, .hunt-delete-dialog button {
+  padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink);
+}
+#huntCalendarPrev, #huntCalendarNext { border: 0; background: transparent; padding: 0 8px; font-size: 2rem; line-height: 1; min-height: 40px; }
+#huntHistory tr { border-top: 1px solid var(--line); }
+.hunt-calendar > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+@media (max-width: 480px) {
+  .hunt-calendar-nav { display: flex; flex-wrap: wrap; }
+  #huntCalendarToday { margin-left: auto; }
+  .hunt-calendar-month-navigation { gap: 4px; }
+}
+.hunt-calendar-week, .hunt-calendar-days { display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); }
+.hunt-calendar-week { text-align: center; font-size: .8rem; color: var(--muted); }
+.hunt-calendar-days > * { min-height: 58px; border-top: 1px solid var(--line); }
+.hunt-calendar-days > :not(:nth-child(7n+1)) { border-inline-start: 1px solid var(--line); }
+.hunt-calendar-days button { padding: 6px 2px; font-variant-numeric: tabular-nums; }
+.hunt-calendar-days small { display: block; font-size: .7rem; color: var(--muted); }
+.hunt-calendar-days button[aria-current="date"] { color: var(--accent); font-weight: 700; }
+.hunt-calendar-days button[aria-pressed="true"] { background: var(--accent-soft); }
+.hunt-calendar-days button:focus-visible { position: relative; z-index: 1; }
+.hunt-calendar button:focus-visible, .hunt-delete-dialog button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.hunt-history-delete { width: 32px; height: 32px; font-size: 1.3rem; border-radius: 6px; }
+.hunt-history-delete:hover { background: var(--accent-soft); }
+.hunt-delete-dialog { width: min(340px,calc(100vw - 32px)); padding: 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); color: var(--ink); }
+#huntHistoryDelete { position: fixed; inset: 0; margin: auto; max-height: calc(100dvh - 32px); }
+.hunt-delete-dialog::backdrop { background: rgb(0 0 0 / 40%); }
+.hunt-delete-dialog h3 { font-weight: 700; }
+.hunt-delete-dialog p { margin: 12px 0 20px; font-size: .875rem; color: var(--muted); }
+.hunt-delete-dialog form > div { display: flex; justify-content: flex-end; gap: 8px; }
+@media (max-width: 767px) {
+  .hunt-status-collection { grid-template-columns: minmax(0, 1fr); grid-auto-rows: 1fr; }
+  .hunt-status-collection > .panel { grid-row: auto; grid-template-rows: auto 1fr; }
+}
 .hunt-volume {
   appearance: none;
   height: 6px;
