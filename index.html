@@ -24,6 +24,7 @@
 <div id="page">
 <header class="site-header">
   <h1><span class="site-logo"><img src="icon/logo.png" width="1376" height="768" alt="땅캐라"></span></h1>
+  <div class="header-dock">
   <nav id="tabNav" role="tablist" aria-label="도구"></nav>
   <div class="header-actions">
     <button type="button" id="themeToggle" role="switch" aria-checked="false" aria-label="다크 모드">
@@ -31,7 +32,14 @@
       <span class="theme-symbol" aria-hidden="true">☀</span>
       <span class="theme-symbol" aria-hidden="true">☾</span>
     </button>
-    <button type="button" id="ideaButton" aria-label="캐릭터 설정 메뉴">캐릭터 <span aria-hidden="true">▾</span></button>
+    <button type="button" id="ideaButton" aria-label="캐릭터 설정 메뉴">
+      <span class="header-character-label">캐릭터 <span aria-hidden="true">▾</span></span>
+      <svg class="header-character-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" focusable="false">
+        <circle cx="12" cy="8" r="3"></circle>
+        <path d="M5.5 19v-1a5 5 0 0 1 5-5h3a5 5 0 0 1 5 5v1"></path>
+      </svg>
+    </button>
+  </div>
   </div>
 </header>
 

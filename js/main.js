@@ -101,3 +101,28 @@ const tabResize = new ResizeObserver(positionTabIndicator);
 tabResize.observe(nav);
 for (const {btn} of views.values()) tabResize.observe(btn);
 requestAnimationFrame(() => { nav.dataset.ready = ''; });
+
+const header = nav.closest('.site-header');
+const headerActions = header.querySelector('.header-actions');
+let headerMotion = [];
+function updateCompactHeader() {
+  const compact = window.scrollY >= 56;
+  if (compact === header.hasAttribute('data-compact')) return;
+  const elements = [nav, headerActions];
+  const previous = elements.map(element => element.getBoundingClientRect());
+  for (const animation of headerMotion) animation.cancel();
+  header.toggleAttribute('data-compact', compact);
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  headerMotion = elements.map((element, index) => {
+    const next = element.getBoundingClientRect();
+    const dx = previous[index].left - next.left;
+    const dy = previous[index].top - next.top;
+    return element.animate(
+      [{translate: `${dx}px ${dy}px`}, {translate: '0 0'}],
+      {duration: 280, easing: 'cubic-bezier(.22, 1, .36, 1)'}
+    );
+  });
+}
+window.addEventListener('scroll', updateCompactHeader, {passive:true});
+window.addEventListener('pageshow', updateCompactHeader);
+updateCompactHeader();

@@ -21,7 +21,7 @@ export function mountPlaza(panel,getCharacter,{onJoin,onLeave,renderMembers,show
         </div>
       </div>
       <div class="plaza-chat-compose">
-        <input name="message" aria-label="광장 채팅" placeholder="광장 채팅" maxlength="120" required autocomplete="off">
+        <input name="message" aria-label="광장 채팅" placeholder="광장 채팅" maxlength="60" required autocomplete="off">
         <button type="submit">보내기</button>
       </div>
       </div>
