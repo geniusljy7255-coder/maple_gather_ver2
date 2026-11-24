@@ -14,6 +14,14 @@ const targetCard=t=>`<div class="card space-y-2 text-center">
 </div>`;
 
 export const installersHtml = TARGETS.map(targetCard).join('');
+export const installerRemoveDialogHtml = `
+<dialog id="huntInstallerRemove" class="hunt-delete-dialog" aria-labelledby="huntInstallerRemoveTitle">
+  <form method="dialog">
+    <h3 id="huntInstallerRemoveTitle">설치기를 삭제할까요?</h3>
+    <p data-installer-remove-message></p>
+    <div><button value="yes">예</button><button value="no" autofocus>아니요</button></div>
+  </form>
+</dialog>`;
 
 const VIEW = {
   unknown: ['탐색 중', 'text-amber-600'],
@@ -47,7 +55,16 @@ export function installerPresentation(id, now) {
 export function bindJobInstallers() {
   const grid = $('huntInstallerGrid');
   const add = $('huntAddInstaller');
-  if (!grid || !add) return;
+  const dialog = $('huntInstallerRemove');
+  if (!grid || !add || !dialog) return;
+  let pendingRemoval = null;
+  dialog.addEventListener('close', () => {
+    const id = pendingRemoval;
+    pendingRemoval = null;
+    if (dialog.returnValue !== 'yes' || !jobInstallers.some(item => item.id === id)) return;
+    removeJobInstaller(id);
+    add.focus();
+  });
   const cards = new Map();
   const sync = () => {
     for (const [id, card] of cards) {
@@ -61,7 +78,7 @@ export function bindJobInstallers() {
         card.innerHTML = `<div class="flex items-center gap-2">
             <img width="24" height="24" alt="" class="hidden h-6 w-6 shrink-0 rounded" data-icon>
             <div class="relative min-w-0 flex-1">
-              <select aria-label="직업 및 스킬" class="h-7 w-full appearance-none rounded border border-slate-300 bg-white py-1 pl-1 pr-7 text-xs">
+              <select aria-label="직업 및 스킬" class="hunt-installer-select h-7 w-full appearance-none rounded border border-slate-300 bg-white py-1 pl-1 pr-7 text-xs">
                 <option value="">직업 - 스킬 선택</option>
                 ${jobSkills.map(skill => `<option value="${skill.id}">${skill.label}</option>`).join('')}
               </select>
@@ -70,7 +87,15 @@ export function bindJobInstallers() {
             <button type="button" aria-label="설치기 삭제" title="설치기 삭제" class="grid h-7 w-7 shrink-0 place-items-center rounded border border-slate-300 bg-white p-0 text-base leading-none text-slate-500 transition hover:bg-slate-100 hover:text-red-600" data-remove>×</button>
           </div><div id="trk-${item.id}-state" class="text-lg font-black text-slate-400">스킬 선택</div>`;
         card.querySelector('select').addEventListener('change', event => updateJobInstaller(item.id,{skill:event.target.value}));
-        card.querySelector('[data-remove]').addEventListener('click', () => removeJobInstaller(item.id));
+        card.querySelector('[data-remove]').addEventListener('click', () => {
+          const current = jobInstallers.find(entry => entry.id === item.id);
+          if (!current) return;
+          pendingRemoval = current.id;
+          const name = jobSkill(current)?.label || '선택한 설치기';
+          dialog.querySelector('[data-installer-remove-message]').textContent = `${name}을(를) 목록에서 삭제합니다.`;
+          dialog.returnValue = '';
+          dialog.showModal();
+        });
         cards.set(item.id, card);
         grid.append(card);
       }

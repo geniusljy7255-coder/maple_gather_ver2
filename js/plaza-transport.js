@@ -5,7 +5,9 @@ export async function plazaRpc(action,values={},signal){
     method:'POST',
     headers:{apikey:plazaConfig.publishableKey,'Content-Type':'application/json'},
     body:JSON.stringify({p_action:action,...values}),
-    signal:signal ? AbortSignal.any([signal,AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000)
+    ...(action==='leave' ? {keepalive:true} : {
+      signal:signal ? AbortSignal.any([signal,AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000)
+    })
   });
   if (!response.ok) throw new Error(`Plaza RPC: ${response.status}`);
   return response.json();

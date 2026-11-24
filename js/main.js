@@ -43,8 +43,9 @@ let current = null;
 function showTab(id) {
   TABS.forEach(t => {
     const { btn, section } = views.get(t.id);
-    section.classList.toggle('hidden', t.id !== id);
+    section.hidden = t.id !== id;
     btn.setAttribute('aria-selected', String(t.id === id));
+    btn.tabIndex = t.id === id ? 0 : -1;
   });
   positionTabIndicator();
 }
@@ -53,7 +54,6 @@ function switchTab(id) {
   const prev = TABS.find(t => t.id === current);
   if (prev && prev.id !== id) prev.onHide?.();
   showTab(id);
-  if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   TABS.find(t => t.id === id)?.onShow?.();
   current = id;
 }
@@ -63,6 +63,7 @@ TABS.forEach(tab => {
   btn.className = 'tab-btn';
   btn.id = `tabBtn-${tab.id}`;
   btn.setAttribute('role', 'tab');
+  btn.setAttribute('aria-controls', 'tab-' + tab.id);
   btn.textContent = tab.title;
   btn.addEventListener('click', () => {
     switchTab(tab.id);
@@ -74,6 +75,8 @@ TABS.forEach(tab => {
   const section = document.createElement('section');
   section.id = `tab-${tab.id}`;
   section.className = `tab-content ${tab.className || ''}`;
+  section.setAttribute('role', 'tabpanel');
+  section.setAttribute('aria-labelledby', btn.id);
   section.innerHTML = tab.html;
   panels.appendChild(section);
 
@@ -81,8 +84,18 @@ TABS.forEach(tab => {
 });
 
 TABS.forEach(tab => tab.mount?.(views.get(tab.id).section));
-showTab(TABS[0].id);
-current = TABS[0].id;
+switchTab(TABS[0].id);
+
+nav.addEventListener('keydown', event => {
+  if (event.target.getAttribute('role') !== 'tab') return;
+  const index = TABS.findIndex(tab => tab.id === current);
+  const last = TABS.length - 1;
+  const next = { ArrowLeft: (index + last) % TABS.length, ArrowRight: (index + 1) % TABS.length, Home: 0, End: last }[event.key];
+  if (!Number.isInteger(next)) return;
+  event.preventDefault();
+  switchTab(TABS[next].id);
+  views.get(TABS[next].id).btn.focus();
+});
 
 const tabResize = new ResizeObserver(positionTabIndicator);
 tabResize.observe(nav);

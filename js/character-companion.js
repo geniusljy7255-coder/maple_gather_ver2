@@ -179,7 +179,7 @@ export function mountCharacterCompanion(trigger){
         </div>
         <button type="submit" data-load>미리보기</button>
       </div>
-      <label>방문 캐릭터 닉네임 <input name="visitors" type="text" maxlength="200" placeholder="닉네임을 쉼표로 구분" autocomplete="off"></label>
+      <label>방문 캐릭터 닉네임 <span class="hint">(,로 구분하여 적어주세요)</span> <input name="visitors" type="text" maxlength="200" placeholder="닉네임을 쉼표로 구분" autocomplete="off"></label>
       <div class="companion-chair-setting">
         <div class="companion-chair-preview" role="img" aria-label="의자 미리보기">
           <div data-chair-preview></div>
@@ -197,7 +197,7 @@ export function mountCharacterCompanion(trigger){
       </div>
       <p class="companion-status" data-status role="status"></p>
       <div class="companion-buttons">
-        <button type="button" data-apply>적용</button>
+        <button type="button" data-apply>캐릭터 저장</button>
         <button type="button" data-summon disabled>소환</button>
       </div>
       </form>
@@ -219,7 +219,7 @@ export function mountCharacterCompanion(trigger){
         </select>
       </label>
         <p class="companion-status" data-map-status role="status"></p>
-        <div class="companion-buttons"><button type="button" data-apply-map>적용</button></div>
+        <div class="companion-buttons"><button type="button" data-apply-map>맵 적용</button></div>
       </section>
       <section class="companion-form" role="tabpanel" id="companion-plaza-panel" aria-labelledby="companion-plaza-tab" data-panel="plaza" hidden>
         <div class="companion-plaza-room">
@@ -228,6 +228,7 @@ export function mountCharacterCompanion(trigger){
           <button type="button" data-plaza-toggle disabled>입장</button>
         </div>
         <p class="companion-status" data-plaza-status role="status">저장한 캐릭터로 광장에 입장할 수 있어요.</p>
+        <button type="button" class="tool-button" data-plaza-setup hidden>캐릭터 관리 열기</button>
       </section>
     </section>`;
   document.body.append(settingsPopup);
@@ -1101,12 +1102,19 @@ export function mountCharacterCompanion(trigger){
     }
     if (section==='character') loadChairs();
     if (section==='map') renderMapPreview();
-    if (section==='plaza') plaza.show();
+    if (section==='plaza') {
+      find('[data-plaza-setup]').hidden=Boolean(settings.name && settings.image);
+      plaza.show();
+    }
     else plaza.hide();
     setListOpen(false);
     setChairListOpen(false);
   }
   for (const tab of tabs) tab.addEventListener('click',()=>showSection(tab.dataset.section));
+  find('[data-plaza-setup]').addEventListener('click',()=>{
+    showSection('character');
+    find('#companionNickname').focus();
+  });
   find('[role=tablist]').addEventListener('keydown',event=>{
     const current=tabs.indexOf(event.target);
     if (current<0) return;

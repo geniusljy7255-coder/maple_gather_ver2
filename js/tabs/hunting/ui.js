@@ -11,7 +11,7 @@ import { formatHMS, formatMS } from '../../core/format.js';
 import { unlockAudio, notify, getVoice, setVoice, getVoiceVolume, setVoiceVolume, ALARM_CHANNELS, isAlarmEnabled, setAlarmEnabled } from '../../core/notify.js';
 import { startCapture, stopCapture, getInfo, getGrabError, onCaptureChange } from './capture.js';
 import * as S from './session.js';
-import { installersHtml, renderInstallers, bindJobInstallers, iconLabel, installerPresentation } from './installers.js';
+import { installersHtml, installerRemoveDialogHtml, renderInstallers, bindJobInstallers, iconLabel, installerPresentation } from './installers.js';
 
 const BTN_PRIMARY = 'rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-indigo-700';
 const BTN_DANGER = 'rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-red-700';
@@ -27,42 +27,50 @@ const dashCard = (label, valueHtml) => `
   <div class="card text-center"><div class="label mb-1 flex min-h-6 items-center justify-center">${label}</div>${valueHtml}</div>`;
 
 export const html = `
-<div class="panel">
-  <div class="grid gap-4 divide-y divide-slate-200 md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] md:divide-x md:divide-y-0">
+<div class="panel capture-toolbar">
+  <div class="capture-layout">
     <section class="min-w-0 space-y-2">
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <h2 class="text-sm font-bold">화면 공유</h2>
-        <span id="huntShareChip" class="chip">공유 안 함</span>
-      </div>
-      <div class="flex flex-wrap gap-2">
+      <div class="capture-actions flex flex-wrap items-center gap-2">
         <button id="huntShareBtn" class="${BTN_PRIMARY}">화면 공유 시작</button>
         <button id="huntPipBtn" class="${BTN_GHOST}">PiP 모드</button>
+        ${timerFormatControl('huntTimerFormat')}
+
       </div>
       <p id="huntPipStatus" class="hint" role="status"></p>
-      <p id="huntShareInfo" class="hint break-words"></p>
-      <p class="hint">퀵슬롯 &amp; 버프 시간 표시는 ‘중앙, 크게’로 설정해 주세요.</p>
-      <p class="hint">솔 에르다 조각은 게임 내 전용 UI를 켜 두어야 수량을 인식할 수 있어요.</p>
+      <div class="capture-help">
+        <strong>게임 화면 설정</strong>
+        <p>공유할 창에서 메이플스토리를 선택해 주세요.</p>
+        <p>퀵슬롯과 버프 시간 표시는 ‘중앙, 크게’로 설정해 주세요.</p>
+        <p>솔 에르다 조각은 게임 내 전용 UI를 켜면 수량을 인식할 수 있어요.</p>
+      </div>
       <p id="huntShareWarn" class="hidden text-xs text-amber-700"></p>
     </section>
-    <section class="min-w-0 space-y-3 pt-4 md:pl-4 md:pt-0">
+    <section class="capture-options" aria-label="음성 알림">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <label class="flex items-center gap-2 text-sm font-bold"><input type="checkbox" id="huntVoice" class="cb"> 음성 알림</label>
         <button id="huntTestSound" class="${BTN_GHOST}">알림 테스트</button>
       </div>
-      <label class="flex items-center gap-2 text-xs font-bold">
-        <span class="shrink-0 whitespace-nowrap">음성 크기</span>
-        <input id="huntVoiceVolume" type="range" min="0" max="100" step="5" class="hunt-volume w-full min-w-0 flex-1">
-        <output class="w-10 shrink-0 text-right tabular-nums" id="huntVoiceVolumeValue" for="huntVoiceVolume"></output>
-      </label>
-      ${alarmRecordingControl('huntAlarmRecording')}
-      <fieldset class="min-w-0 rounded-lg bg-slate-50 px-3 py-2">
-        <legend class="px-1 text-xs font-bold text-slate-600">알림별 소리</legend>
-        <div class="flex flex-wrap gap-x-4 gap-y-2">${ALARM_CHANNELS.map(c=>`<label class="flex items-center gap-2 whitespace-nowrap text-xs"><input id="alarm-${c.id}" type="checkbox" class="cb">${c.label}</label>`).join('')}</div>
-        <div id="jobAlarmControls" class="flex flex-wrap gap-x-4 gap-y-2"></div>
-      </fieldset>
+      <div class="voice-controls">
+        ${alarmRecordingControl('huntAlarmRecording')}
+        <label class="flex items-center gap-2 text-xs font-bold">
+          <span class="shrink-0 whitespace-nowrap">음성 크기</span>
+          <input id="huntVoiceVolume" type="range" min="0" max="100" step="5" class="hunt-volume w-full min-w-0 flex-1">
+          <output class="w-10 shrink-0 text-right tabular-nums" id="huntVoiceVolumeValue" for="huntVoiceVolume"></output>
+        </label>
+      </div>
+      <div class="capture-options-body">
+          <fieldset class="min-w-0 rounded-lg bg-slate-50 px-3 py-2">
+            <legend class="px-1 text-xs font-bold text-slate-600">알림별 소리</legend>
+            <div class="flex flex-wrap gap-x-4 gap-y-2">${ALARM_CHANNELS.map(c=>`<label class="flex items-center gap-2 whitespace-nowrap text-xs"><input id="alarm-${c.id}" type="checkbox" class="cb">${c.label}</label>`).join('')}</div>
+            <div id="jobAlarmControls" class="flex flex-wrap gap-x-4 gap-y-2"></div>
+          </fieldset>
+      </div>
     </section>
   </div>
 </div>
+${installerRemoveDialogHtml}
+
+${calendarHtml}
 
 <div class="hunt-status-collection">
 <div class="panel hunt-status-panel">
@@ -114,11 +122,8 @@ export const html = `
 
 </div>
 
-${calendarHtml}
-
 <div class="panel">
   <h2 class="panel-h"><span><span class="dot"></span>룬 · 설치기</span><div class="flex flex-wrap items-center justify-end gap-2">
-    ${timerFormatControl('huntTimerFormat')}
     <button id="huntAddInstaller" class="${BTN_GHOST}">설치기 추가하기</button>
   </div></h2>
   <div id="huntInstallerGrid" class="grid gap-3">
@@ -174,16 +179,12 @@ function surfaceWarn(surface) {
 
 function renderShare() {
   const i = getInfo();
-  const chip = $('huntShareChip');
-  setText('huntShareChip', i.active ? '공유 중' : '공유 안 함');
-  ['!border-emerald-300', '!bg-emerald-50', '!text-emerald-700'].forEach(c => chip.classList.toggle(c, i.active));
 
   const btn = $('huntShareBtn');
   setText('huntShareBtn', i.active ? '화면 공유 중지' : '화면 공유 시작');
   const buttonClass = i.active ? BTN_DANGER : BTN_PRIMARY;
   if (btn.className !== buttonClass) btn.className = buttonClass;
 
-  setText('huntShareInfo', '화면 공유 시작 버튼을 눌러 MapleStory 화면을 공유 해주세요.');
 
   const warn = i.active ? getGrabError() || detectorStatus.error || surfaceWarn(i.surface) : shareError;
   setText('huntShareWarn', warn);
@@ -367,16 +368,16 @@ async function togglePip() {
   button.disabled = true;
   try {
     const jobColumns = Math.ceil(jobInstallers.filter(jobSkill).length / 2);
-    const width = Math.min(671 + jobColumns * 106, globalThis.screen?.availWidth || 1000);
-    const win = await api.requestWindow({width,height:105});
+    const width = Math.min(651 + jobColumns * 106, globalThis.screen?.availWidth || 1000);
+    const win = await api.requestWindow({width,height:63});
     pipWindow = win;
     const doc = win.document;
     doc.title = '땅캐라 · 사냥 현황';
     doc.documentElement.lang = 'ko';
-    doc.body.style.cssText = 'margin:0;padding:10px;background:var(--canvas);color:var(--ink);font:13px system-ui,sans-serif';
+    doc.body.style.cssText = 'margin:0;background:var(--canvas);color:var(--ink);font:13px Pretendard,system-ui,sans-serif;font-variant-numeric:tabular-nums';
     pipStrip = doc.createElement('div');
     pipStrip.className = 'pip-strip';
-    pipStrip.style.cssText = 'display:flex;flex:1;min-width:0;overflow-x:auto;align-self:stretch';
+    pipStrip.style.cssText = 'display:flex;flex:1;min-width:0;overflow-x:auto;scrollbar-width:thin;align-self:stretch';
     const style = doc.createElement('style');
     style.textContent = `
       :root {
@@ -419,7 +420,7 @@ async function togglePip() {
     pipControls = newHuntButtons(doc,controls);
     pipStrip.firstElementChild.append(controls);
     const panel = doc.createElement('div');
-    panel.style.cssText = 'display:flex;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:5px 0';
+    panel.style.cssText = 'display:flex;align-items:center;padding:5px 0';
     const close = doc.createElement('button');
     close.type = 'button';
     close.className = 'pip-close';

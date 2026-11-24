@@ -13,7 +13,7 @@ import {
  * 스케줄러: 상태 / API
  * ============================================================ */
 const STATE_KEY = 'maple_scheduler_state';
-const MAX_NAMES = 12;
+const MAX_NAMES = 8;
 let characters = [];      // 조회된 캐릭터: { name, ocid, basic, scheduler }
 let selectedIdx = -1;     // 선택된 캐릭터 번호
 let charNames = [''];     // 닉네임 입력칸 값
@@ -46,11 +46,18 @@ function saveApiKey(val) { localStorage.setItem('nexon_api_key', val.trim()); }
 function loadNames() {
   try {
     const arr = JSON.parse(localStorage.getItem('nexon_character_names') || 'null');
-    if (Array.isArray(arr) && arr.length) return arr;
+    if (Array.isArray(arr) && arr.length) return arr.slice(0, MAX_NAMES);
   } catch (e) { /* 무시 */ }
   return [localStorage.getItem('nexon_character_name') || ''];   // 이전 버전에서 저장한 닉네임
 }
-const saveNames = () => localStorage.setItem('nexon_character_names', JSON.stringify(charNames));
+function saveNames() {
+  let saved;
+  try { saved = readJSON('nexon_character_names'); } catch {}
+  if (Array.isArray(saved) && saved.length > MAX_NAMES) {
+    localStorage.setItem('nexon_character_names_before_limit', JSON.stringify(saved));
+  }
+  localStorage.setItem('nexon_character_names', JSON.stringify(charNames));
+}
 export function getSchedulerCharacters() {
   const loaded=new Map(characters.map(({name,basic})=>[name,basic.character_image]));
   return [...new Set([...loaded.keys(),...loadNames().filter(name=>typeof name==='string').map(name=>name.trim()).filter(Boolean)])]
@@ -59,14 +66,10 @@ export function getSchedulerCharacters() {
 
 function renderNameRows() {
   $('nameList').innerHTML = charNames.map((n, i) => `
-    <div class="grid grid-cols-[2rem_1fr_5.5rem] items-center gap-2">
-      <button onclick="${i === 0 ? 'addName()' : `removeName(${i})`}" aria-label="${i === 0 ? '닉네임 칸 추가' : '닉네임 칸 삭제'}"
-              class="h-9 w-8 rounded-lg border border-slate-300 bg-white text-base font-black text-slate-600 transition hover:bg-slate-100">${i === 0 ? '+' : '−'}</button>
+    <div class="scheduler-name-entry">
+      <button type="button" onclick="${i ? `removeName(${i})` : 'addName()'}" aria-label="${i ? '닉네임 칸 삭제' : '닉네임 칸 추가'}" class="scheduler-name-action" ${!i && charNames.length >= MAX_NAMES ? 'disabled' : ''}>${i ? '−' : '+'}</button>
       <input type="text" value="${esc(n)}" placeholder="닉네임을 입력하세요" class="input text-left" data-idx="${i}"
              oninput="setName(this.dataset.idx, this.value)" onkeyup="if(event.key==='Enter') fetchCharacterInfo()">
-      ${i === 0
-        ? '<button id="fetchBtn" onclick="fetchCharacterInfo()" class="h-[38px] w-full rounded-lg bg-indigo-600 text-sm font-bold text-white transition hover:bg-indigo-700 disabled:opacity-60">조회</button>'
-        : '<span></span>'}
     </div>`).join('');
 }
 function addName() {
@@ -112,7 +115,7 @@ async function fetchCharacterInfo() {
         const scheduler = await schedulerRes.json();
         if (!basicRes.ok) throw new Error(basic.error?.message || '캐릭터 정보 조회 실패');
 
-        found.push({ name, ocid: idData.ocid, basic, scheduler: schedulerRes.ok ? scheduler : {} });
+        found.push({ name, ocid: idData.ocid, basic, scheduler: schedulerRes.ok ? scheduler : null });
       } catch (err) {
         errors.push(`${name}: ${err.message || '데이터를 불러오는 중 오류가 발생했습니다.'}`);
       }
@@ -158,9 +161,10 @@ function renderAccountRevenue() {
     weekly += renderBossGrid(groupBossContentsByCycle(boss, 'weekly'), WEEKLY_DIFF_KEYS, state, true).revenue;
     monthly += renderBossGrid(groupBossContentsByCycle(boss, 'monthly'), MONTHLY_DIFF_KEYS, state, true).revenue;
   });
-  setText('accDailyRevenue', formatKoreanMoney(daily));
-  setText('accWeeklyRevenue', formatKoreanMoney(weekly));
-  setText('accMonthlyRevenue', formatKoreanMoney(monthly));
+  const hasSchedule = characters.some(c => c.scheduler);
+  setText('accDailyRevenue', hasSchedule ? formatKoreanMoney(daily) : '조회 전');
+  setText('accWeeklyRevenue', hasSchedule ? formatKoreanMoney(weekly) : '조회 전');
+  setText('accMonthlyRevenue', hasSchedule ? formatKoreanMoney(monthly) : '조회 전');
 }
 
 /* ============================================================
@@ -177,19 +181,36 @@ function isTaskCompleted(item, type) {
   return Boolean(item.max_count && item.now_count >= item.max_count);
 }
 
+const bossCycleKeywords = {
+  daily: ['일간', '일일', '하루', '1일', 'daily'],
+  weekly: ['주간', '주일', '1주', 'weekly'],
+  monthly: ['월간', '매월', '1개월', 'monthly']
+};
+const dailyBossDifficulties = new Map([
+  ['자쿰', ['easy', 'normal']], ['파풀라투스', ['easy', 'normal']],
+  ['매그너스', ['easy', 'normal']], ['힐라', ['normal', 'hard']],
+  ['혼테일', ['easy', 'normal', 'chaos']], ['반 레온', ['easy', 'normal', 'hard']],
+  ['아카이럼', ['easy', 'normal']], ['카웅', ['normal']], ['핑크빈', ['normal']],
+  ...['블러디퀸', '반반', '피에르', '벨룸'].map(name => [name, ['normal']])
+]);
+
 function groupBossContentsByCycle(bossItems, targetCycle) {
-  const keywords = { daily: ['일간', 'daily'], weekly: ['주간', 'weekly'], monthly: ['월간', 'monthly'] }[targetCycle];
   const grouped = {};
 
   (bossItems || []).forEach((item, originalIdx) => {
-    const name = item.content_name.trim();
-    if (name.includes('메이린')) return;
+    const name = item.content_name?.trim();
+    if (!name || name.includes('메이린')) return;
 
-    const cycle = (item.cycle || item.boss_type || '').toLowerCase();
-    if (!keywords.some(k => cycle.includes(k))) return;
+    const rawDifficulty = String(item.difficulty || 'normal').trim().toLowerCase();
+    const difficulty = Object.keys(DIFF_KOR).find(key => DIFF_KOR[key] === rawDifficulty)
+      || (rawDifficulty === '익스트림' ? 'extreme' : rawDifficulty);
+    const cycleText = [item.cycle, item.boss_type].filter(Boolean).join(' ').toLowerCase();
+    const cycle = Object.entries(bossCycleKeywords).find(([, labels]) => labels.some(label => cycleText.includes(label)))?.[0]
+      || (dailyBossDifficulties.get(name)?.includes(difficulty) ? 'daily' : undefined);
+    if (cycle !== targetCycle) return;
 
     grouped[name] ??= { name, cycle: item.cycle || item.boss_type, difficulties: {} };
-    grouped[name].difficulties[(item.difficulty || 'normal').toLowerCase()] = { ...item, originalIdx };
+    grouped[name].difficulties[difficulty] = { ...item, originalIdx };
   });
 
   return Object.values(grouped);
@@ -215,8 +236,8 @@ const COL_DIFF = 'w-10 shrink-0 flex justify-center items-center';
 
 function bossHeaderHtml(diffKeys, party) {
   return `
-    <div class="flex items-center gap-1 border-b border-slate-100 pb-1 text-[10px] font-bold text-slate-400 pr-5">
-      <span class="flex-1 pl-1">보스</span>
+    <div class="flex items-center gap-1 border-b border-slate-100 px-1.5 pb-1 text-[10px] font-bold text-slate-400">
+      <span class="min-w-0 flex-1">보스</span>
       ${party ? `<span class="${COL_PARTY}">인원수</span>` : ''}
       ${diffKeys.map(d => `<span class="${COL_DIFF}">${DIFF_KOR[d]}</span>`).join('')}
     </div>`;
@@ -272,6 +293,8 @@ function renderScheduler() {
   renderAccountRevenue();
   renderCharCards();
   const c = currentChar();
+  $('schedulerCharacters').hidden = !characters.length;
+  $('schedulerAccount').hidden = !characters.length;
   $('schedulerBody').classList.toggle('hidden', !c);
   if (!c) return;
 
@@ -342,7 +365,9 @@ function renderScheduler() {
   sections.forEach(s => {
     const bosses = groupBossContentsByCycle(apiData.boss_contents, s.cycle);
     const res = renderBossGrid(bosses, s.keys, state, s.party);
-    $(s.list).innerHTML = res.html;
+    $(s.list).innerHTML = s.cycle === 'daily' && !bosses.length
+      ? emptyMsg('조회 응답에 일간 보스 기록이 없습니다.')
+      : res.html;
     setText(s.progress, `${res.cleared}/${bosses.length}`);
     setText(s.revenue, formatKoreanMoney(res.revenue));
   });
@@ -352,35 +377,37 @@ function renderScheduler() {
  * 탭 정의
  * ============================================================ */
 const html = `
-    <div class="panel">
-      <h2 class="panel-h">
-        <span><span class="dot"></span>캐릭터 정보 조회</span>
-        <span class="hint">Nexon Open API 연동 · + 버튼으로 캐릭터 추가</span>
-      </h2>
+    <section id="schedulerSetup" class="panel scheduler-setup">
+      <h2>캐릭터 조회</h2>
 
       <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
-        <div class="card">
-          <label class="label mb-1.5 block" for="apiKey">Nexon Open API Key (본인 api)</label>
+        <div class="min-w-0">
+          <label class="label mb-1.5 block" for="apiKey">넥슨 Open API 키</label>
           <input type="password" id="apiKey" placeholder="API Key 입력" class="input text-left" onchange="saveApiKey(this.value)">
         </div>
-        <div class="card md:col-span-2">
-          <span class="label mb-1.5 block">캐릭터 닉네임</span>
-          <div id="nameList" class="space-y-2"></div>
+        <div class="min-w-0 md:col-span-2">
+          <div class="scheduler-name-heading"><span class="label">캐릭터 닉네임</span></div>
+          <div class="scheduler-lookup-row"><div id="nameList"></div><button id="fetchBtn" type="button" onclick="fetchCharacterInfo()" class="tool-button tool-primary">조회</button></div>
         </div>
       </div>
 
+      <p class="hint">이번 주에 게임에 접속한 캐릭터의 기록을 조회할 수 있어요.</p>
       <div id="charError" class="hidden rounded-lg border border-red-200 bg-red-50 p-2 text-center text-xs font-bold text-red-500"></div>
-    </div>
+    </section>
 
-    <div class="panel">
-      <h2 class="panel-h"><span><span class="dot"></span>계정 보스 수익 · 캐릭터 선택 <span class="hint ml-1">(주마다 캐릭터를 최소 1번 이상 접속 해야지 정상적으로 호출 됩니다.)</span></span></h2>
+    <section id="schedulerAccount" class="panel scheduler-account" hidden>
+      <h3 class="panel-h">계정 보스 수익</h3>
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div class="card text-center"><div class="label mb-1">계정 일간 보스 수익</div><div id="accDailyRevenue" class="text-sm font-black text-indigo-600">0 메소</div></div>
-        <div class="card text-center"><div class="label mb-1">계정 주간 보스 수익</div><div id="accWeeklyRevenue" class="text-sm font-black text-indigo-600">0 메소</div></div>
-        <div class="card text-center"><div class="label mb-1">계정 월간 보스 수익</div><div id="accMonthlyRevenue" class="text-sm font-black text-indigo-600">0 메소</div></div>
+        <div class="card text-center"><div class="label mb-1">일간</div><div id="accDailyRevenue" class="text-sm font-black text-indigo-600">조회 전</div></div>
+        <div class="card text-center"><div class="label mb-1">주간</div><div id="accWeeklyRevenue" class="text-sm font-black text-indigo-600">조회 전</div></div>
+        <div class="card text-center"><div class="label mb-1">월간</div><div id="accMonthlyRevenue" class="text-sm font-black text-indigo-600">조회 전</div></div>
       </div>
+    </section>
+
+    <div id="schedulerCharacters" class="panel scheduler-characters" hidden>
+      <h3 class="panel-h">캐릭터 선택</h3>
       <div id="charCards" class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6"></div>
-      <p id="charEmpty" class="hint text-center">닉네임을 입력하고 조회하면 캐릭터가 여기에 표시됩니다.</p>
+      <p id="charEmpty" class="hint">닉네임을 입력하고 조회하면 캐릭터가 여기에 표시됩니다.</p>
     </div>
 
     <div id="schedulerBody" class="panel hidden">
@@ -413,23 +440,25 @@ const html = `
 
       <div class="card space-y-2">
         <h3 class="flex justify-between border-b border-slate-100 pb-2 text-xs font-bold text-slate-900"><span>주간 보스</span><span id="weeklyBossProgress" class="text-indigo-600">0/0</span></h3>
-        <div id="weeklyBossHead"></div>
-        <div id="weeklyBossList" class="max-h-96 space-y-1 overflow-y-auto text-xs"></div>
+        <div class="boss-table-scroll max-h-96"><div id="weeklyBossHead"></div>
+        <div id="weeklyBossList" class="space-y-1 text-xs"></div></div>
       </div>
 
       <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div class="card space-y-2">
           <h3 class="flex justify-between border-b border-slate-100 pb-2 text-xs font-bold text-slate-900"><span>일간 보스</span><span id="dailyBossProgress" class="text-indigo-600">0/0</span></h3>
-          <div id="dailyBossHead"></div>
-          <div id="dailyBossList" class="max-h-60 space-y-1 overflow-y-auto text-xs"></div>
+          <div class="boss-table-scroll max-h-60"><div id="dailyBossHead"></div>
+          <div id="dailyBossList" class="space-y-1 text-xs"></div></div>
         </div>
         <div class="card space-y-2">
           <h3 class="flex justify-between border-b border-slate-100 pb-2 text-xs font-bold text-slate-900"><span>월간 보스</span><span id="monthlyBossProgress" class="text-indigo-600">0/0</span></h3>
-          <div id="monthlyBossHead"></div>
-          <div id="monthlyBossList" class="max-h-60 space-y-1 overflow-y-auto text-xs"></div>
+          <div class="boss-table-scroll max-h-60"><div id="monthlyBossHead"></div>
+          <div id="monthlyBossList" class="space-y-1 text-xs"></div></div>
         </div>
       </div>
     </div>
+
+
 `;
 
 function mount() {

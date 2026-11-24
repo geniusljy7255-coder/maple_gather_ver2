@@ -21,40 +21,41 @@ const iconBox = (item, size = 7) => `
   </span>`;
 
 const drawerItem = i => `
-  <div class="card p-2.5">
+  <div class="drawer-item">
     <div class="mb-2 flex items-center gap-2">${iconBox(i)}<span class="label truncate">${i.name}</span></div>
     <div class="grid grid-cols-[2fr_1fr] gap-2">
       <div>
-        <span class="text-[10px] font-bold text-slate-400">시세</span>
-        <input type="text" id="${i.id}" value="${i.price || ''}" class="input mt-0.5 ${i.fixed ? 'cursor-not-allowed bg-slate-100' : ''}" ${i.fixed ? 'readonly' : 'oninput="handleInput(this)"'}>
+        <label class="sr-only" for="${i.id}">${i.name} 시세</label>
+        <input type="text" inputmode="numeric" id="${i.id}" value="${i.price || ''}" class="input mt-0.5 ${i.fixed ? 'cursor-not-allowed bg-slate-100' : ''}" ${i.fixed ? 'readonly' : 'oninput="handleInput(this)"'}>
         <div id="${i.id}Kor" class="kor"></div>
       </div>
       <div>
-        <span class="text-[10px] font-bold text-slate-400">보유 수량</span>
-        <input type="text" id="own_${i.id}" value="0" class="input mt-0.5" oninput="handleInput(this)">
-        <div id="own_${i.id}Cnt" class="kor !text-slate-500"></div>
+        <label class="sr-only" for="own_${i.id}">${i.name} 보유 수량</label>
+        <input type="text" inputmode="numeric" id="own_${i.id}" value="0" class="input mt-0.5" oninput="handleInput(this)">
       </div>
     </div>
   </div>`;
 
 function buildDrawer() {
   $('drawerBody').innerHTML = `
-    <label class="card flex cursor-pointer items-center gap-2 p-3 text-sm font-bold text-slate-800">
+    <fieldset class="drawer-options"><legend>할인 혜택</legend>
+    <label class="drawer-option flex cursor-pointer items-center gap-2 p-3 text-sm font-bold text-slate-800">
       <input type="checkbox" id="guildCheck" class="cb" onchange="handleInput()">
       길드 가입 <span class="hint">(수수료 · 채집 도구 할인 4%)</span>
     </label>
-    <label class="card flex cursor-pointer items-center gap-2 p-3 text-sm font-bold text-slate-800">
+    <label class="drawer-option flex cursor-pointer items-center gap-2 p-3 text-sm font-bold text-slate-800">
       <input type="checkbox" id="mvpCheck" class="cb" onchange="handleInput()">
       MVP 보유 <span class="hint">(경매장 수수료 5% → 3%)</span>
     </label>
-    <div class="card p-2.5">
+    </fieldset>
+    <div class="drawer-fatigue">
       <div class="mb-2 flex items-center gap-2">${iconBox({ icon: '피로도' })}<label class="label" for="dailyFatigue">사용 피로도</label></div>
-      <input type="text" id="dailyFatigue" value="500" class="input" oninput="handleInput(this)">
-      <div id="dailyFatigueKor" class="kor"></div>
+      <div class="fatigue-input"><input type="text" aria-label="사용 피로도" inputmode="numeric" id="dailyFatigue" value="500" class="input" oninput="handleInput(this)"><span aria-hidden="true">피로도</span></div>
     </div>` +
     GROUP_TITLES.map((title, g) => `
-      <div class="space-y-2">
+      <div class="drawer-group">
         <span class="sub-h">${title}</span>
+        <div class="drawer-cols"><span>시세</span><span>보유 수량</span></div>
         ${ITEMS.filter(i => i.g === g).map(drawerItem).join('')}
       </div>`).join('');
 }
@@ -63,17 +64,17 @@ const cardHtml = c => {
   const out = ITEM[c.out];
   const desc = c.desc || `1회: 피로도 ${c.fatigue} → ${c.yield}개`;
   return `
-    <div id="card_${c.id}" class="card flex flex-col gap-3 p-4 md:flex-row">
+    <div id="card_${c.id}" class="recipe-row flex flex-col gap-3 p-4 md:flex-row">
       <div class="space-y-1.5 md:w-56 md:shrink-0">
-        <div class="flex items-center gap-1">${iconBox(out, 8)}<h3 class="text-sm font-bold leading-snug text-slate-900">${c.title || out.name}</h3></div>
-        <p class="pl-3 text-xs text-slate-500">${desc}</p>
-        <p id="${c.id}_fat" class="pl-3 text-xs font-semibold text-slate-700"></p>
+        <div class="flex items-center gap-1">${iconBox(out, 8)}<h4 class="text-sm font-bold leading-snug text-slate-900">${c.title || out.name}</h4></div>
+        <p class="text-xs text-slate-500">${desc}</p>
+        <p id="${c.id}_fat" class="text-xs font-semibold text-slate-700"></p>
         <div class="flex items-baseline justify-between gap-1.5 rounded-lg bg-indigo-50 px-3 py-1.5"><span id="${c.id}_outLabel" class="text-[11px] font-bold text-slate-500"></span><span id="${c.id}_outNum" class="text-2xl font-black leading-none text-indigo-600">0</span><span class="text-[11px] font-bold text-slate-500">개</span></div>
       </div>
       <div id="${c.id}_mats" class="flex flex-1 flex-wrap content-start gap-1.5 border-slate-100 md:border-x md:px-4"></div>
-      <div class="space-y-1 text-xs md:w-52 md:shrink-0">
+      <div class="recipe-results space-y-1 text-xs md:w-52 md:shrink-0">
+        <div class="flex justify-between gap-2"><span class="text-slate-500" title="경매장 수수료를 뺀 금액">실수령액</span><b id="${c.id}_rev" class="text-right"></b></div>
         <div class="flex justify-between gap-2"><span class="text-slate-500">추가 구매 비용</span><b id="${c.id}_cost" class="text-right"></b></div>
-        <div class="flex justify-between gap-2"><span class="text-slate-500">판매가(수수료 포함)</span><b id="${c.id}_rev" class="text-right"></b></div>
         <div class="flex justify-between gap-2 border-t border-slate-100 pt-1.5"><span class="font-bold text-slate-800">순이익</span><b id="${c.id}_profit" class="text-right text-sm"></b></div>
       </div>
     </div>`;
@@ -81,27 +82,28 @@ const cardHtml = c => {
 
 function buildRecipes() {
   $('recipeList').innerHTML = SECTION_TITLES.map((title, sec) => `
-    <div class="space-y-3">
-      <div class="flex items-center gap-3">
-        <span class="rounded-full bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-700">${title}</span>
-        <span class="h-px flex-1 bg-slate-200"></span>
-      </div>
+    <section class="recipe-group" aria-labelledby="recipe-group-${sec}">
+      <h3 id="recipe-group-${sec}">${title}</h3>
       ${CARDS.filter(c => c.sec === sec).map(cardHtml).join('')}
-    </div>`).join('');
+    </section>`).join('');
 }
 
 /* 시세·보유 패널 열기/닫기 */
-let drawerOpen = true;
+let drawerOpen = false;
 function setDrawer(open) {
   drawerOpen = open;
-  $('drawerWrap').classList.toggle('-translate-x-full', !open);
+  $('drawerWrap').dataset.open = String(open);
   $('drawerBackdrop').classList.toggle('hidden', !open);
-  const btn = $('drawerToggle');
-  btn.textContent = open ? '닫기' : '시세 · 보유';
-  btn.classList.toggle('py-10', open);
-  btn.classList.toggle('py-4', !open);
+  const handle = $('drawerToggle');
+  handle.setAttribute('aria-expanded', String(open));
+  handle.textContent = open ? '닫기' : '시세 · 보유';
+  $('priceDrawer').inert = !open;
+  if (open) updateFade();
 }
-const toggleDrawer = () => setDrawer(!drawerOpen);
+const toggleDrawer = () => {
+  setDrawer(!drawerOpen);
+  $('drawerToggle').focus();
+};
 
 // 스크롤바 대신, 아래로 더 내릴 수 있을 때만 하단 그라데이션 표시
 function updateFade() {
@@ -264,9 +266,7 @@ function calculate() {
   const fatigue = getVal('dailyFatigue');
   ITEMS.forEach(i => {
     setText(`${i.id}Kor`, formatKoreanMoney(getVal(i.id)));
-    setText(`own_${i.id}Cnt`, `${getVal(`own_${i.id}`).toLocaleString()} 개`);
   });
-  setText('dailyFatigueKor', `${fatigue.toLocaleString()} 피로도`);
   setText('toolPriceKor', `${formatKoreanMoney(getVal('toolPrice'))} (씨앗 1개 ≈ ${Math.round(getVal('toolPrice') / 500).toLocaleString()} 메소)`);
   setText('craftHint', `사용 피로도 ${fatigue.toLocaleString()} 전부 사용 기준 · 길드 ${guild ? '가입' : '미가입'} · MVP ${mvp ? '적용' : '미적용'} · 경매장 수수료 ${mvp ? '3%' : '5%'}`);
 
@@ -288,7 +288,7 @@ function calculate() {
  * 탭 정의
  * ============================================================ */
 const html = `
-    <div class="space-y-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-right">
+    <div class="craft-summary">
       <p id="craftHint" class="text-xs font-semibold text-slate-700"></p>
       <p class="hint">오일류는 부캐릭터로도 제작 레벨과 관계없이 만들 수 있습니다.</p>
     </div>
@@ -303,7 +303,11 @@ function mount() {
 
   $('drawerScroll').addEventListener('scroll', updateFade);
   window.addEventListener('resize', updateFade);
-  setDrawer(window.innerWidth >= 900);
+  $('drawerToggle').addEventListener('click', toggleDrawer);
+  $('drawerWrap').addEventListener('keydown', event => {
+    if (drawerOpen && event.key === 'Escape') toggleDrawer();
+  });
+  setDrawer(false);
   updateFade();
 }
 
@@ -317,6 +321,7 @@ function onShow() {
   updateFade();
 }
 function onHide() {
+  setDrawer(false);
   $('drawerWrap').classList.add('hidden');
   $('drawerBackdrop').classList.add('hidden');
 }

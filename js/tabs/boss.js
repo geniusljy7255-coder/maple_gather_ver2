@@ -9,7 +9,7 @@ import {getTimerFormat,onTimerFormatChange} from './hunting/detector.js';
 import {kalosLabels} from './kalos-minimap.js';
 import {bindTimerFormat,timerFormatControl} from './hunting/timer-format-control.js';
 import {advanceBossAlert,bossReference,confirmBossRegion,readBossRegion} from './boss-recognition.js';
-import {BOSS_NAME_LIMIT,BOSS_PRESET_LIMIT,BOSS_UTILITY_LIMIT,addBossPreset,applyBossPresetDraft,bossName,bossRegion,
+import {BOSS_NAME_LIMIT,BOSS_PRESET_LIMIT,BOSS_UTILITY_LIMIT,BOSS_UTILITY_NAME_LIMIT,addBossPreset,applyBossPresetDraft,bossName,bossRegion,
   isAscent,loadBossPresets,saveBossPresets} from './boss-presets.js';
 import {correctKaringConfusion,estimateKaringGauge,karingAlertTransitions,karingBand,karingNames,karingThreadAttack,karingThreads,karingWarning,
   planKaringThreads} from './karing-gauge.js';
@@ -31,12 +31,12 @@ const accentButton='rounded-lg border border-indigo-600 bg-indigo-600 px-3 py-1.
 const shareStart='rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-indigo-700 disabled:opacity-50';
 const shareStop='rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-red-700 disabled:opacity-50';
 const alarmControl=({id,label})=>`<label class="flex items-center gap-2 whitespace-nowrap text-xs">
-  <input type="checkbox" class="cb" data-boss-channel="${id}">${label}
+  <input type="checkbox" class="cb" data-boss-channel="${id}"><span>${label}</span>
 </label>`;
 const input='min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm';
+const defaultUtilityName='생존기·유틸기';
 const burstOverlapMs=3000;
 const threadTextClass={'빨간색':'karing-red','초록색':'karing-green','노란색':'karing-yellow'};
-const utilityColumns='grid grid-cols-[2.75rem_minmax(0,1fr)_4.5rem_1.75rem] items-center gap-1 sm:gap-2';
 const buffIcon=file=>new URL('../../icon/buff/'+encodeURIComponent(file)+'.png',import.meta.url).href;
 const buffFile=entry=>Array.isArray(entry) ? entry[1] : entry.replaceAll(' ','_');
 const buffAssets=buffGroups.flatMap((group,index)=>group.map(entry=>({group:'boss-buff-'+index,file:buffFile(entry)})));
@@ -57,58 +57,78 @@ function buffGroup(group) {
 }
 
 const html=`
-<div class="panel">
-  <div class="grid gap-4 divide-y divide-slate-200 md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] md:divide-x md:divide-y-0">
+<div class="panel capture-toolbar">
+  <div class="capture-layout">
     <section class="min-w-0 space-y-2">
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <h2 class="text-sm font-bold">화면 공유</h2>
-        <span class="chip" data-boss-share-chip>공유 안 함</span>
-      </div>
-      <div class="flex flex-wrap gap-2">
+      <div class="capture-actions flex flex-wrap items-center gap-2">
         <button type="button" class="${shareStart}" data-boss-share>화면 공유 시작</button>
         <button type="button" class="${button}" data-boss-pip>PiP 모드</button>
+        ${timerFormatControl('bossTimerFormat')}
+
       </div>
-      <p class="hint">화면 공유 시작 버튼을 눌러 MapleStory 화면을 공유 해주세요.</p>
-      <p class="hint">퀵슬롯 &amp; 버프 시간 표시는 ‘중앙, 크게’로 설정해 주세요.</p>
-      <p class="hint">화면 공유 후 영역 지정 버튼을 눌러 원하는 스킬의 영역을 지정해 주세요.</p>
+      <div class="capture-help">
+        <strong>게임 화면 설정</strong>
+        <p>퀵슬롯과 버프 시간 표시는 ‘중앙, 크게’로 설정해 주세요.</p>
+        <p>공유한 뒤 프리셋에서 사용할 스킬의 인식 영역을 지정해 주세요.</p>
+      </div>
       <p class="hint" role="status" data-boss-status hidden></p>
       <p class="hint" role="status" data-boss-pip-status hidden></p>
     </section>
-    <section class="min-w-0 space-y-3 pt-4 md:pl-4 md:pt-0">
+    <section class="capture-options" aria-label="음성 알림">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <label class="flex items-center gap-2 text-sm font-bold"><input id="bossVoice" type="checkbox" class="cb">음성 알림</label>
         <button type="button" class="${button} !py-2" data-boss-voice-test>알림 테스트</button>
       </div>
-      <label class="flex items-center gap-2 text-xs font-bold">
-        <span class="shrink-0 whitespace-nowrap">음성 크기</span>
-        <input id="bossVoiceVolume" type="range" min="0" max="100" step="5" class="hunt-volume w-full min-w-0 flex-1">
-        <output class="w-10 shrink-0 text-right tabular-nums" for="bossVoiceVolume" data-boss-volume-value></output>
-      </label>
-      ${alarmRecordingControl('bossAlarmRecording')}
-      <fieldset class="min-w-0 rounded-lg bg-slate-50 px-3 py-2">
-        <legend class="px-1 text-xs font-bold text-slate-600">알림별 소리</legend>
-        <div class="flex flex-wrap gap-x-4 gap-y-2">${BOSS_ALARM_CHANNELS.filter(channel=>channel.id!=='boss-karing').map(alarmControl).join('')}</div>
-        <div class="mt-2 flex flex-wrap gap-x-4 gap-y-2">${alarmControl(BOSS_ALARM_CHANNELS.find(channel=>channel.id==='boss-karing'))}</div>
-      </fieldset>
+      <div class="voice-controls">
+        ${alarmRecordingControl('bossAlarmRecording')}
+        <label class="flex items-center gap-2 text-xs font-bold">
+          <span class="shrink-0 whitespace-nowrap">음성 크기</span>
+          <input id="bossVoiceVolume" type="range" min="0" max="100" step="5" class="hunt-volume w-full min-w-0 flex-1">
+          <output class="w-10 shrink-0 text-right tabular-nums" for="bossVoiceVolume" data-boss-volume-value></output>
+        </label>
+      </div>
+      <div class="capture-options-body">
+          <fieldset class="min-w-0 rounded-lg bg-slate-50 px-3 py-2">
+            <legend class="px-1 text-xs font-bold text-slate-600">알림별 소리</legend>
+            <div class="flex flex-wrap gap-x-4 gap-y-2">${BOSS_ALARM_CHANNELS.filter(channel=>channel.id!=='boss-utility').map(alarmControl).join('')}</div>
+            <div class="boss-utility-alarms" data-boss-utility-alarms></div>
+          </fieldset>
+      </div>
     </section>
   </div>
 </div>
-<div class="grid gap-3 md:grid-cols-2">
-  <div class="grid min-w-0 content-stretch gap-3 md:self-stretch">
-<section class="card min-w-0 space-y-3">
-  <div class="flex flex-wrap items-center justify-between gap-2">
-    <h2 class="text-sm font-bold">프리셋</h2>
-    <div class="ml-auto flex flex-wrap items-center justify-end gap-2">
-      ${timerFormatControl('bossTimerFormat')}
-      <button type="button" class="${button}" data-boss-preset-edit>수정</button>
-      <button type="button" class="${button}" data-boss-preset-add>+ 추가</button>
-      <button type="button" class="${button}" data-boss-preset-save hidden>저장</button>
-      <button type="button" class="${button}" data-boss-preset-cancel hidden>취소</button>
-    </div>
+<div class="boss-preset-group">
+<div class="boss-preset-bar">
+  <div class="boss-preset-scroll" data-boss-preset-scroll>
+    <button type="button" class="boss-preset-arrow" data-preset-scroll="-1" aria-label="이전 프리셋 보기" hidden>‹</button>
+    <div class="boss-preset-tabs" role="group" aria-label="프리셋 선택" data-boss-presets></div>
+    <button type="button" class="boss-preset-arrow" data-preset-scroll="1" aria-label="다음 프리셋 보기" hidden>›</button>
   </div>
-  <div class="flex flex-wrap items-center gap-2" data-boss-presets></div>
-  <p class="hint" role="status" data-boss-preset-status hidden></p>
-</section>
+  <div class="boss-preset-actions flex items-center gap-2">
+      <button type="button" class="${button}" data-boss-preset-edit>프리셋 수정</button>
+      <button type="button" class="${button}" data-boss-preset-add>프리셋 추가</button>
+  </div>
+</div>
+<dialog class="card boss-preset-dialog" data-boss-preset-dialog aria-labelledby="bossPresetDialogTitle">
+  <header class="boss-preset-dialog-heading">
+    <h2 id="bossPresetDialogTitle">프리셋 수정</h2>
+    <p>이름을 변경하거나 사용하지 않는 프리셋을 삭제할 수 있어요.</p>
+  </header>
+  <div class="boss-preset-fields" data-boss-preset-fields></div>
+  <div class="boss-preset-dialog-actions">
+    <button type="button" class="${accentButton}" data-boss-preset-save>저장</button>
+    <button type="button" class="${button}" data-boss-preset-cancel>취소</button>
+  </div>
+</dialog>
+<dialog class="hunt-delete-dialog" data-boss-preset-remove-dialog aria-labelledby="bossPresetRemoveTitle">
+  <form method="dialog">
+    <h3 id="bossPresetRemoveTitle">프리셋을 삭제할까요?</h3>
+    <p data-boss-preset-remove-message></p>
+    <div><button value="yes">예</button><button value="no" autofocus>아니요</button></div>
+  </form>
+</dialog>
+<section class="card boss-workspace">
+  <p class="hint boss-preset-status" role="status" data-boss-preset-status hidden></p>
 <dialog class="card !fixed !inset-auto !left-1/2 !top-1/2 !m-0 -translate-x-1/2 -translate-y-1/2 max-h-[calc(100dvh_-_2rem)] w-[calc(100%_-_2rem)] max-w-6xl space-y-3 overflow-auto overscroll-contain text-[color:var(--ink)] backdrop:bg-black/50" data-boss-editor aria-labelledby="boss-editor-title">
   <div class="flex flex-wrap items-center justify-between gap-2">
     <h2 id="boss-editor-title" class="text-sm font-bold" data-boss-editor-title>인식 영역 지정</h2>
@@ -125,32 +145,39 @@ const html=`
     <div class="pointer-events-none absolute border-2 border-indigo-400 bg-indigo-400/20" data-boss-selection hidden></div>
   </div>
 </dialog>
-    ${['burst','semi'].map(type=>`<section class="card flex items-center">
-      <div class="flex w-full items-center justify-between gap-2">
-        <h2 class="text-sm font-bold">${titles[type]} 알림</h2>
+    <section class="boss-buffs">
+    <div class="boss-skill-section-heading"><h2>버프기</h2></div>
+    <div class="boss-timers">
+    ${['burst','semi'].map(type=>`<section class="boss-skill-card boss-timer-row">
+        <h2 class="boss-skill-title">${titles[type]} 알림</h2>
         <div data-boss-list="${type}"></div>
-      </div>
     </section>`).join('')}
-    <section class="card flex items-center gap-2">
-      <h2 class="text-sm font-bold">일격필살</h2><span class="hint ml-auto" data-boss-buff-time="일격필살">--:--</span>
+    <section class="boss-skill-card boss-timer-row">
+      <h2 class="boss-skill-title">일격필살</h2>
+      <span class="boss-timer-value" data-boss-buff-time="일격필살">--:--</span><span class="hint boss-timer-foot">자동 인식</span>
     </section>
-  </div>
-  <section class="card min-w-0 space-y-2">
-    <div class="flex flex-wrap items-center justify-between gap-2">
-      <h2 class="text-sm font-bold">생존기·유틸기</h2>
-      <button type="button" class="${button}" data-boss-add="utility">스킬 추가</button>
     </div>
-    <div class="${utilityColumns} text-[10px] font-semibold text-slate-500">
-      <span class="text-center">음성 알림</span>
-      <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_3.5rem] items-center gap-1">
-        <span>이름 (변경 가능)</span><span class="text-center">쿨타임</span>
+    </section>
+  <section class="boss-utility min-w-0">
+    <div class="boss-skill-section-heading">
+      <h2>생존기·유틸기</h2>
+      <div class="boss-utility-actions">
+        <button type="button" class="${button}" data-boss-add="utility">스킬 추가</button>
+        <button type="button" class="${button}" data-boss-remove-mode aria-pressed="false">스킬 제거</button>
       </div>
-      <span class="text-center">영역 지정</span><span class="text-center">삭제</span>
     </div>
-    <div class="space-y-2" data-boss-list="utility"></div>
+    <div class="boss-utility-cards" data-boss-list="utility"></div>
   </section>
+</section>
 </div>
-<section class="card space-y-2">
+<dialog class="hunt-delete-dialog" data-boss-remove-dialog aria-labelledby="bossRemoveDialogTitle">
+  <form method="dialog">
+    <h3 id="bossRemoveDialogTitle">스킬을 삭제할까요?</h3>
+    <p data-boss-remove-message></p>
+    <div><button value="yes">예</button><button value="no" autofocus>아니요</button></div>
+  </form>
+</dialog>
+<section class="card boss-pattern space-y-2">
   <h2 class="text-sm font-bold">패턴 도우미</h2>
   <div class="flex flex-wrap items-center justify-between gap-2">
     <div class="flex gap-2">
@@ -191,19 +218,18 @@ const html=`
   data-boss-area-message role="status" hidden></div>`;
 
 function skillRow(skill) {
-  const areaButton=`<button type="button" class="${skill.region ? button : accentButton} whitespace-nowrap" data-boss-edit>${skill.region ? '영역 수정' : '영역 지정'}</button>`;
-  if (skill.type!=='utility') return `<div class="flex items-center gap-2" data-boss-skill="${skill.id}">
-    <span class="hint tabular-nums" aria-label="남은 시간" data-boss-reading="${skill.id}">--:--</span>${areaButton}</div>`;
+  const areaButton=`<button type="button" class="boss-area-action" data-boss-edit data-configured="${!!skill.region}">${skill.region ? '✓ 영역 수정' : '＋ 영역 지정'}</button>`;
+  if (skill.type!=='utility') return `<div class="boss-timer-reading" data-boss-skill="${skill.id}">
+    <span class="boss-timer-value" aria-label="남은 시간" data-boss-reading="${skill.id}">--:--</span>${areaButton}</div>`;
   const ascent=isAscent(skill);
-  return `<div class="${utilityColumns}" data-boss-skill="${skill.id}">
-    <input type="checkbox" class="cb justify-self-center" aria-label="${esc(skill.name)} 음성 알림" data-boss-alert ${ascent ? 'disabled' : skill.alert ? 'checked' : ''}>
-    <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_3.5rem] items-center gap-1">
-      <input type="text" maxlength="${BOSS_NAME_LIMIT}" class="${input} w-full" aria-label="스킬 이름" value="${esc(skill.name)}"
+  return `<div class="boss-skill-card boss-utility-card" data-boss-skill="${skill.id}">
+    <div class="boss-utility-card-heading">
+      <input type="text" maxlength="${BOSS_UTILITY_NAME_LIMIT}" class="${input} boss-skill-title w-full" aria-label="스킬 이름" value="${esc(skill.name)}"
         ${ascent ? 'disabled style="background-color:var(--surface-soft);color:var(--muted)"' : 'data-boss-skill-name'}>
-      <span class="hint whitespace-nowrap text-center tabular-nums" aria-label="${ascent ? '남은 충전 횟수' : '남은 시간'}" data-boss-reading="${skill.id}">${ascent ? '—' : '--:--'}</span>
     </div>
+    <span class="boss-timer-value" aria-label="${ascent ? '남은 충전 횟수' : '남은 시간'}" data-boss-reading="${skill.id}">${ascent ? '—' : '--:--'}</span>
     ${areaButton}
-    <button type="button" class="grid h-7 w-7 place-items-center rounded-lg border border-slate-300 bg-white p-0 text-sm leading-none text-slate-700 transition enabled:hover:bg-slate-100 enabled:hover:text-red-600 disabled:opacity-50" aria-label="스킬 삭제" title="스킬 삭제" data-boss-remove ${ascent ? 'disabled' : ''}>×</button>
+    ${ascent ? '' : `<button type="button" class="boss-utility-remove" aria-label="${esc(skill.name)} 삭제" data-boss-remove><span aria-hidden="true">×</span></button>`}
   </div>`;
 }
 
@@ -211,6 +237,15 @@ function mount(section) {
   const $=selector=>section.querySelector(selector);
   bindAlarmRecording($('#bossAlarmRecording'),'boss');
   const settings=loadBossPresets(localStorage);
+  if (!isAlarmEnabled('boss-utility')) {
+    for (const preset of settings.presets) {
+      for (const skill of preset.skills) {
+        if (skill.type==='utility') skill.alert=false;
+      }
+    }
+    saveBossPresets(localStorage,settings);
+    setAlarmEnabled('boss-utility',true);
+  }
   const current=()=>settings.presets[settings.active];
   const utilityAtLimit=()=>current().skills.filter(skill=>skill.type==='utility' && !isAscent(skill)).length>=BOSS_UTILITY_LIMIT;
   let karingSettings;
@@ -294,12 +329,66 @@ function mount(section) {
     } catch {}
   }
   const presets=$('[data-boss-presets]');
+  const presetScroll=$('[data-boss-preset-scroll]');
+  const presetArrows=[...presetScroll.querySelectorAll('[data-preset-scroll]')];
+  let presetDrag=null, suppressPresetClick=false;
+  function syncPresetScroll() {
+    const overflow=presets.scrollWidth>presetScroll.clientWidth+1;
+    for (const arrow of presetArrows) arrow.hidden=!overflow;
+    presetArrows[0].disabled=presets.scrollLeft<=1;
+    presetArrows[1].disabled=presets.scrollLeft+presets.clientWidth>=presets.scrollWidth-1;
+    presets.toggleAttribute('data-overflow',overflow);
+  }
+  function revealActivePreset() {
+    const active=presets.querySelector('[aria-pressed="true"]');
+    if (!active || !presets.clientWidth) return;
+    const viewport=presets.getBoundingClientRect(), tab=active.getBoundingClientRect();
+    if (tab.left<viewport.left) presets.scrollLeft+=tab.left-viewport.left;
+    else if (tab.right>viewport.right) presets.scrollLeft+=tab.right-viewport.right;
+    syncPresetScroll();
+  }
+  new ResizeObserver(()=>{
+    syncPresetScroll();
+    revealActivePreset();
+  }).observe(presetScroll);
+  presets.addEventListener('scroll',syncPresetScroll,{passive:true});
+  for (const arrow of presetArrows) {
+    arrow.addEventListener('click',()=>presets.scrollBy({
+      left:Number(arrow.dataset.presetScroll)*Math.max(72,presets.clientWidth*.75),
+      behavior:matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+    }));
+  }
+  presets.addEventListener('pointerdown',event=>{
+    suppressPresetClick=false;
+    if (event.pointerType!=='mouse' || event.button!==0 || !presets.hasAttribute('data-overflow')) return;
+    presetDrag={id:event.pointerId,x:event.clientX,left:presets.scrollLeft};
+  });
+  presets.addEventListener('pointermove',event=>{
+    if (!presetDrag || event.pointerId!==presetDrag.id || !(event.buttons&1)) return;
+    const distance=event.clientX-presetDrag.x;
+    if (!suppressPresetClick && Math.abs(distance)<5) return;
+    if (!suppressPresetClick) {
+      suppressPresetClick=true;
+      presets.setPointerCapture(event.pointerId);
+      presets.setAttribute('data-dragging','');
+    }
+    presets.scrollLeft=presetDrag.left-distance;
+  });
+  for (const type of ['pointerup','pointercancel','lostpointercapture']) {
+    presets.addEventListener(type,()=>{
+      presetDrag=null;
+      presets.removeAttribute('data-dragging');
+    });
+  }
   const presetEdit=$('[data-boss-preset-edit]');
+  const presetDialog=$('[data-boss-preset-dialog]');
+  const presetFields=$('[data-boss-preset-fields]');
+  const presetRemoveDialog=$('[data-boss-preset-remove-dialog]');
+  let pendingPresetRemoval=null;
   const presetSave=$('[data-boss-preset-save]');
   const presetCancel=$('[data-boss-preset-cancel]');
   const presetAdd=$('[data-boss-preset-add]');
   const share=$('[data-boss-share]');
-  const shareChip=$('[data-boss-share-chip]');
   const editor=$('[data-boss-editor]');
   const canvas=$('[data-boss-frame]');
   const selection=$('[data-boss-selection]');
@@ -328,17 +417,14 @@ function mount(section) {
     if (!pip || pip.closed) return;
     const doc=pip.document,body=doc.body;
     body.replaceChildren();
-    const heading=doc.createElement('h1');
-    heading.textContent=current().name;
-    const header=doc.createElement('header');
-    header.append(heading);
     if (isKaringEnabled()) {
+      const header=doc.createElement('header');
       const advice=doc.createElement('span');
       advice.dataset.karingRecommendation='';
       advice.hidden=true;
       header.append(advice);
+      body.append(header);
     }
-    body.append(header);
     const skills=current().skills;
     const cell=(name,attribute,value)=>`<div class="pip-skill"><strong>${esc(name)}</strong><span ${attribute}="${value}">--:--</span></div>`;
     const skillCell=skill=>skill ? cell(skill.name,'data-boss-reading',skill.id) : '<div></div>';
@@ -628,18 +714,17 @@ function mount(section) {
     renderReadings(Date.now());
   });
   function renderPresets() {
-    const editing=Boolean(presetDraft);
-    presetEdit.hidden=editing;
-    presetAdd.hidden=editing;
-    presetSave.hidden=!editing;
-    presetCancel.hidden=!editing;
     presetAdd.disabled=settings.presets.length>=BOSS_PRESET_LIMIT;
-    presets.innerHTML=editing ? presetDraft.map(({name},index)=>`<div class="inline-flex min-w-0 items-center gap-1">
-      <input class="${input} box-border h-8 w-32 !py-0" maxlength="${BOSS_NAME_LIMIT}" data-boss-preset-name="${index}" aria-label="프리셋 이름" value="${esc(name)}">
-      <button type="button" class="${button} box-border !h-8 !w-8 !p-0" data-boss-preset-remove="${index}"
-        aria-label="${esc(name)} 삭제" ${presetDraft.length===1 ? 'disabled' : ''}>×</button>
-    </div>`).join('') : settings.presets.map((preset,index)=>`<button type="button"
-      aria-pressed="${index===settings.active}" class="${index===settings.active ? accentButton : button}" data-boss-preset-select="${index}">${esc(preset.name)}</button>`).join('');
+    presets.innerHTML=settings.presets.map((preset,index)=>`<button type="button"
+      aria-pressed="${index===settings.active}" class="${button}" data-boss-preset-select="${index}">${esc(preset.name)}</button>`).join('');
+    syncPresetScroll();
+  }
+  function renderPresetFields() {
+    presetFields.innerHTML=presetDraft.map(({name},index)=>`<div class="boss-preset-field">
+      <input class="${input}" maxlength="${BOSS_NAME_LIMIT}" data-boss-preset-name="${index}" aria-label="프리셋 ${index+1} 이름" value="${esc(name)}">
+      <button type="button" class="boss-preset-field-remove" data-boss-preset-remove="${index}"
+        aria-label="프리셋 ${index+1} 삭제" title="프리셋 삭제" ${presetDraft.length===1 ? 'disabled' : ''}>×</button>
+    </div>`).join('');
   }
   function gaugeRows({compact=false}={}) {
     return gauges.map(({key,name})=>{
@@ -659,6 +744,9 @@ function mount(section) {
   }
   function render() {
     renderPresets();
+    const skills=current().skills;
+    removeModeButton.disabled=!skills.some(skill=>skill.type==='utility' && !isAscent(skill));
+    if (removeModeButton.disabled) setRemoveMode(false);
     $('[data-boss-add="utility"]').disabled=utilityAtLimit();
     karingAreaButton.className=gaugePanel.region ? button : accentButton;
     karingAreaButton.textContent=gaugePanel.region ? '게이지 영역 수정' : '게이지 영역 지정';
@@ -666,12 +754,23 @@ function mount(section) {
     kalosAreaButton.textContent=kalosChargePanel.region ? '게이지 영역 수정' : '게이지 영역 지정';
     $('[data-karing-gauges]').innerHTML=gaugeRows();
     for (const [type,title] of Object.entries(titles)) {
-      const list=current().skills.filter(skill=>skill.type===type);
+      const list=skills.filter(skill=>skill.type===type);
       $(`[data-boss-list="${type}"]`).innerHTML=list.map(skillRow).join('') ||
         `<p class="hint">${title}에 등록된 스킬이 없습니다.</p>`;
     }
+    renderUtilityAlarms();
     renderPip();
     renderReadings(Date.now());
+  }
+  const hasUtilityAlarm=()=>current().skills.some(skill=>skill.type==='utility' && !isAscent(skill) && skill.alert);
+  function renderUtilityAlarms() {
+    const host=$('[data-boss-utility-alarms]');
+    host.innerHTML=current().skills.filter(skill=>skill.type==='utility' && !isAscent(skill)).map(skill=>`
+      <label class="flex min-w-0 items-center gap-2 text-xs">
+        <input type="checkbox" class="cb shrink-0" data-boss-utility-alarm="${skill.id}" ${skill.alert ? 'checked' : ''}>
+        <span>${esc(skill.name)}</span>
+      </label>`).join('');
+    host.hidden=!host.childElementCount;
   }
   function paintSelection() {
     selection.hidden=!draft;
@@ -749,8 +848,6 @@ function mount(section) {
     renderKalos();
     share.textContent=active ? '화면 공유 중지' : '화면 공유 시작';
     share.className=active ? shareStop : shareStart;
-    shareChip.textContent=active ? '공유 중' : '공유 안 함';
-    for (const color of ['!border-emerald-300','!bg-emerald-50','!text-emerald-700']) shareChip.classList.toggle(color,active);
     if (!active) {
       closeEditor();
       worker?.terminate();
@@ -765,19 +862,31 @@ function mount(section) {
     }
   }
 
-  presets.addEventListener('input',event=>{
+  presetFields.addEventListener('input',event=>{
     const field=event.target.closest('[data-boss-preset-name]');
     if (field && presetDraft) presetDraft[Number(field.dataset.bossPresetName)].name=field.value;
   });
+  presetFields.addEventListener('click',event=>{
+    const remove=event.target.closest('[data-boss-preset-remove]');
+    if (!remove || !presetDraft || presetDraft.length<=1) return;
+    pendingPresetRemoval=presetDraft[Number(remove.dataset.bossPresetRemove)];
+    const name=bossName(pendingPresetRemoval.name) || pendingPresetRemoval.preset.name;
+    $('[data-boss-preset-remove-message]').textContent=`‘${name}’ 삭제는 저장을 눌러야 반영됩니다.`;
+    presetRemoveDialog.returnValue='';
+    presetRemoveDialog.showModal();
+  });
+  presetRemoveDialog.addEventListener('close',()=>{
+    const pending=pendingPresetRemoval;
+    pendingPresetRemoval=null;
+    if (presetRemoveDialog.returnValue!=='yes' || !presetDialog.open || !presetDraft || presetDraft.length<=1) return;
+    const index=presetDraft.indexOf(pending);
+    if (index<0) return;
+    presetDraft.splice(index,1);
+    renderPresetFields();
+    presetFields.querySelectorAll('input')[Math.min(index,presetDraft.length-1)]?.focus();
+  });
   presets.addEventListener('click',event=>{
-    if (presetDraft) {
-      const remove=event.target.closest('[data-boss-preset-remove]');
-      if (remove && presetDraft.length>1) {
-        presetDraft.splice(Number(remove.dataset.bossPresetRemove),1);
-        renderPresets();
-      }
-      return;
-    }
+    if (suppressPresetClick && event.detail>0) return;
     const selected=event.target.closest('[data-boss-preset-select]');
     if (!selected) return;
     settings.active=Number(selected.dataset.bossPresetSelect);
@@ -785,6 +894,7 @@ function mount(section) {
     closeEditor();
     persist();
     render();
+    revealActivePreset();
   });
   presetAdd.addEventListener('click',()=>{
     addBossPreset(settings);
@@ -792,16 +902,16 @@ function mount(section) {
     closeEditor();
     persist();
     render();
+    revealActivePreset();
   });
   presetEdit.addEventListener('click',()=>{
     presetDraft=settings.presets.map(preset=>({preset,name:preset.name}));
-    renderPresets();
-    presets.querySelector('input')?.select();
+    renderPresetFields();
+    presetDialog.showModal();
+    presetFields.querySelector('input')?.select();
   });
-  presetCancel.addEventListener('click',()=>{
-    presetDraft=null;
-    renderPresets();
-  });
+  presetCancel.addEventListener('click',()=>presetDialog.close());
+  presetDialog.addEventListener('close',()=>{presetDraft=null;});
   presetSave.addEventListener('click',()=>{
     if (!presetDraft) return;
     const selected=current();
@@ -810,7 +920,7 @@ function mount(section) {
       closeEditor();
       clearReadings();
     }
-    presetDraft=null;
+    presetDialog.close();
     persist();
     render();
   });
@@ -834,7 +944,16 @@ function mount(section) {
   });
   for (const control of channels) control.addEventListener('change',()=>{
     setAlarmEnabled(control.dataset.bossChannel,control.checked);
-    setVoice(channels.some(input=>isAlarmEnabled(input.dataset.bossChannel)),'boss');
+    setVoice(channels.some(input=>input.checked) || hasUtilityAlarm(),'boss');
+    syncVoice();
+  });
+  $('[data-boss-utility-alarms]').addEventListener('change',event=>{
+    if (!event.target.matches('[data-boss-utility-alarm]')) return;
+    const skill=current().skills.find(item=>item.id===Number(event.target.dataset.bossUtilityAlarm));
+    if (!skill || isAscent(skill)) return;
+    skill.alert=event.target.checked;
+    setVoice(channels.some(input=>input.checked) || hasUtilityAlarm(),'boss');
+    persist();
     syncVoice();
   });
   volume.value=getVoiceVolume('boss');
@@ -863,21 +982,27 @@ function mount(section) {
     if (utilityAtLimit()) return;
     const type=add.dataset.bossAdd, skills=current().skills;
     const id=Math.max(0,...skills.map(skill=>skill.id))+1;
-    skills.push({id,type,name:titles[type]+' 스킬',alert:true,region:null});
+    skills.push({id,type,name:defaultUtilityName,alert:true,region:null});
     persist();
     render();
     $(`[data-boss-skill="${id}"] [data-boss-skill-name]`).select();
+  });
+  section.addEventListener('input',event=>{
+    if (!event.target.matches('[data-boss-skill-name]')) return;
+    const {bossSkill}=event.target.closest('[data-boss-skill]').dataset;
+    const label=$(`[data-boss-utility-alarm="${bossSkill}"] + span`);
+    if (label) label.textContent=bossName(event.target.value,BOSS_UTILITY_NAME_LIMIT) || defaultUtilityName;
   });
   section.addEventListener('change',event=>{
     const row=event.target.closest('[data-boss-skill]');
     if (!row) return;
     const skill=current().skills.find(item=>item.id===Number(row.dataset.bossSkill));
     if (!skill || isAscent(skill)) return;
-    if (event.target.matches('[data-boss-alert]')) skill.alert=event.target.checked;
     if (event.target.matches('[data-boss-skill-name]')) {
-      const name=bossName(event.target.value) || titles[skill.type]+' 스킬';
+      const name=bossName(event.target.value,BOSS_UTILITY_NAME_LIMIT) || defaultUtilityName;
       if (isAscent({...skill,name}) && current().skills.some(isAscent)) {
         event.target.value=skill.name;
+        renderUtilityAlarms();
         return;
       }
       skill.name=name;
@@ -891,10 +1016,35 @@ function mount(section) {
         return;
       }
       event.target.value=skill.name;
+      row.querySelector('[data-boss-remove]')?.setAttribute('aria-label',skill.name+' 삭제');
       if (editing===skill) $('[data-boss-editor-title]').textContent=skill.name+' 인식 영역';
     }
     persist();
+    renderUtilityAlarms();
     renderPip();
+  });
+  const removeDialog=$('[data-boss-remove-dialog]');
+  const removeModeButton=$('[data-boss-remove-mode]');
+  const utilityCards=$('[data-boss-list="utility"]');
+  function setRemoveMode(active) {
+    removeModeButton.setAttribute('aria-pressed',String(active));
+    removeModeButton.textContent=active ? '제거 모드 종료' : '스킬 제거';
+    utilityCards.toggleAttribute('data-remove-mode',active);
+  }
+  removeModeButton.addEventListener('click',()=>setRemoveMode(!utilityCards.hasAttribute('data-remove-mode')));
+  let pendingRemoval=null;
+  removeDialog.addEventListener('close',()=>{
+    const skill=pendingRemoval;
+    pendingRemoval=null;
+    if (removeDialog.returnValue!=='yes' || !skill || !current().skills.includes(skill)) return;
+    if (editing===skill) closeEditor();
+    current().skills=current().skills.filter(item=>item!==skill);
+    observations.delete(skill.id);
+    revision++;
+    persist();
+    render();
+    const target=removeModeButton.disabled ? $('[data-boss-add="utility"]') : removeModeButton;
+    target.focus();
   });
   section.addEventListener('click',event=>{
     const kalosButton=event.target.closest('[data-kalos-area]');
@@ -915,13 +1065,11 @@ function mount(section) {
     if (action.matches('[data-boss-edit]')) {
       captureFor(skill,action);
     } else {
-      if (isAscent(skill)) return;
-      if (editing===skill) closeEditor();
-      current().skills=current().skills.filter(item=>item.id!==id);
-      observations.delete(id);
-      revision++;
-      persist();
-      render();
+      if (isAscent(skill) || !utilityCards.hasAttribute('data-remove-mode')) return;
+      pendingRemoval=skill;
+      $('[data-boss-remove-message]').textContent=skill.name+' 스킬이 현재 프리셋에서 삭제됩니다.';
+      removeDialog.returnValue='';
+      removeDialog.showModal();
     }
   });
 
@@ -1023,6 +1171,8 @@ function mount(section) {
     choice.addEventListener('click',()=>{
       const showKaring=choice.dataset.patternBoss==='karing';
       if (choice.getAttribute('aria-pressed')==='true') return;
+      const patternName={karing:'카링',kalos:'칼로스'}[choice.dataset.patternBoss];
+      $('[data-boss-channel="boss-karing"] + span').textContent=patternName ? `패턴 도우미 (${patternName})` : '패턴 도우미';
       karingPanel.hidden=!showKaring;
       kalosPanel.hidden=choice.dataset.patternBoss!=='kalos';
       kalosAreaButton.hidden=kalosPanel.hidden;
@@ -1054,7 +1204,7 @@ function mount(section) {
     try {
       const extra=current().skills.filter(skill=>skill.type==='utility' && !isAscent(skill)).length;
       const width=24+(2+Math.ceil(extra/2))*142+(isKaringEnabled() ? 222 : kalosPanel.hidden ? 0 : 156);
-      const window=await api.requestWindow({width,height:108});
+      const window=await api.requestWindow({width,height:63});
       pip=window;
       window.document.title='보스 도우미';
       const theme=getComputedStyle(document.documentElement);
@@ -1065,9 +1215,10 @@ function mount(section) {
           --muted:${theme.getPropertyValue('--muted')};--accent:${theme.getPropertyValue('--accent')};
           --line:${theme.getPropertyValue('--line')};--pip-thread-red:${dark ? '#f87171' : '#b91c1c'};
           --pip-thread-green:${dark ? '#4ade80' : '#166534'};--pip-thread-yellow:${dark ? '#fde047' : '#854d0e'}}
-        body{margin:0;padding:10px;background:var(--surface-soft);color:${theme.getPropertyValue('--ink')};font:12px system-ui,sans-serif}
-        header{display:flex;align-items:center;gap:8px;min-height:15px;margin:0 0 6px}
-        h1{margin:0;font-size:11px;color:var(--muted)}
+        body{margin:0;background:var(--surface-soft);color:${theme.getPropertyValue('--ink')};font:12px system-ui,sans-serif}
+        header{display:none}
+        header:has([data-karing-recommendation]:not([hidden])){display:flex;align-items:center;height:15px}
+        header:has([data-karing-recommendation]:not([hidden])) + .pip-strip{min-height:48px}
         [data-karing-recommendation]{margin-left:auto;color:var(--muted);font-size:11px;font-weight:700;text-align:right}
         .karing-red{color:var(--pip-thread-red)}.karing-green{color:var(--pip-thread-green)}.karing-yellow{color:var(--pip-thread-yellow)}
         .pip-strip{display:flex;align-items:stretch;gap:6px;min-height:62px}

@@ -19,8 +19,8 @@ export const calendarHtml=`
   <div id="huntCalendarDays" class="hunt-calendar-days" role="group" aria-label="사냥 기록 날짜 선택"></div>
   <h3 id="huntCalendarDate" class="text-sm font-bold" aria-live="polite"></h3>
   <div class="overflow-x-auto">
-    <table class="w-full text-left text-xs tabular-nums">
-      <thead><tr>${['시작 시간','사냥 시간','경험치','솔 에르다 조각','삭제'].map(label=>`<th scope="col" class="whitespace-nowrap px-2 py-2">${label}</th>`).join('')}</tr></thead>
+    <table class="hunt-history-table w-full text-left text-xs tabular-nums">
+      <thead><tr>${['시작 시간','사냥 시간','경험치','솔 에르다 조각'].map(label=>`<th scope="col" class="whitespace-nowrap px-2 py-2">${label}</th>`).join('')}<th scope="col" class="hunt-history-action"><span class="sr-only">삭제</span></th></tr></thead>
       <tbody id="huntHistory"></tbody>
     </table>
   </div>
@@ -84,7 +84,7 @@ export function mountHuntCalendar(root,getHunt,removeRecord){
       const values=[timeFormat.format(item.startedAt),formatHMS(item.durationMs ?? item.endedAt-item.startedAt),item.gainPercent===null ? '미확인' : '+'+item.gainPercent.toFixed(4)+'%p',item.fragments+'개'];
       for(const value of values){const cell=document.createElement('td');cell.className='whitespace-nowrap px-2 py-2';cell.textContent=value;row.append(cell);}
       const cell=document.createElement('td'),button=document.createElement('button');
-      button.type='button';button.className='hunt-history-delete';button.textContent='×';
+      cell.className='hunt-history-action';button.type='button';button.className='hunt-history-delete';button.textContent='×';
       button.setAttribute('aria-label',`${values[0]} 사냥 기록 삭제`);
       button.addEventListener('click',()=>{pending=item;dialog.showModal();});
       cell.append(button);row.append(cell);host.append(row);

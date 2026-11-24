@@ -1,8 +1,10 @@
 const KEY = 'boss_presets_v1';
-export const BOSS_PRESET_LIMIT = 8;
-export const BOSS_UTILITY_LIMIT = 6;
+export const BOSS_PRESET_LIMIT = 6;
+export const BOSS_UTILITY_LIMIT = 5;
+const BOSS_SAVED_UTILITY_LIMIT = 6;
 export const BOSS_NAME_LIMIT = 8;
-export const bossName = value => value.trim().slice(0,BOSS_NAME_LIMIT).trimEnd();
+export const BOSS_UTILITY_NAME_LIMIT = 7;
+export const bossName = (value,limit=BOSS_NAME_LIMIT) => value.trim().slice(0,limit).trimEnd();
 const sections = new Set(['burst', 'semi', 'utility']);
 const fixedSlots = [['burst','극딜'],['semi','준극딜']];
 export const isAscent = skill => skill.type==='utility' && skill.name==='어센트';
@@ -11,7 +13,7 @@ function withFixedSlots(skills) {
   let utilityCount=0, hasAscent=false;
   const utility=skills.filter(skill=>{
     if (skill.type!=='utility') return false;
-    if (!isAscent(skill)) return utilityCount++<BOSS_UTILITY_LIMIT;
+    if (!isAscent(skill)) return utilityCount++<BOSS_SAVED_UTILITY_LIMIT;
     if (hasAscent) return false;
     hasAscent=true;
     return true;
@@ -63,7 +65,7 @@ export function loadBossPresets(storage) {
       const name=skill.type==='utility' && skill.id===3 && skill.name==='에르다 파운틴' ? '홀리 파운틴' : skill.name;
       const reference=Array.isArray(skill.reference) && skill.reference.length===768 &&
         skill.reference.every(v=>Number.isInteger(v) && v>=0 && v<=255) ? skill.reference : null;
-      const normalized={id:skill.id,type:skill.type,name:bossName(name)};
+      const normalized={id:skill.id,type:skill.type,name:bossName(name,skill.type==='utility' ? BOSS_UTILITY_NAME_LIMIT : BOSS_NAME_LIMIT)};
       return [{...normalized,alert:!isAscent(normalized) && skill.alert!==false,region,reference:region ? reference : null}];
     });
     return {name:(typeof saved.name==='string' && bossName(saved.name)) || fallback.name,
@@ -105,5 +107,10 @@ export function applyBossPresetDraft(state,draft) {
 }
 
 export function saveBossPresets(storage,state) {
+  let previous;
+  try { previous=JSON.parse(storage.getItem(KEY)); } catch {}
+  if (previous?.presets?.length>BOSS_PRESET_LIMIT) {
+    storage.setItem(KEY+'_before_limit',JSON.stringify(previous));
+  }
   storage.setItem(KEY,JSON.stringify({...state,version:3}));
 }
