@@ -10,15 +10,12 @@ export function mountPlaza(panel,getCharacter,{onJoin,onLeave,renderMembers,show
   stage.setAttribute('aria-label','광장 1');
   stage.innerHTML=`
     <form class="plaza-chat">
+      <div class="plaza-chat-surface">
       <div class="plaza-chat-history">
-        <button type="button" class="plaza-chat-summary" aria-label="채팅 내역" aria-expanded="false" aria-controls="plazaChatHistoryPanel">
-          <span data-chat-preview>아직 채팅이 없어요.</span>
-          <span class="plaza-chat-expanded-title" aria-hidden="true">채팅 내역</span>
-          <span class="plaza-chat-history-toggle" aria-hidden="true"></span>
-        </button>
+        <button type="button" class="plaza-chat-history-toggle" aria-label="채팅 내역 펼치기" aria-expanded="false" aria-controls="plazaChatHistoryPanel"></button>
+        <div class="plaza-chat-summary" data-chat-preview>아직 채팅이 없어요.</div>
         <div id="plazaChatHistoryPanel" class="plaza-chat-history-panel" inert>
           <div class="plaza-chat-history-content">
-            <p data-chat-empty>아직 채팅이 없어요.</p>
             <ol aria-label="최근 광장 채팅" data-chat-history></ol>
           </div>
         </div>
@@ -27,7 +24,8 @@ export function mountPlaza(panel,getCharacter,{onJoin,onLeave,renderMembers,show
         <input name="message" aria-label="광장 채팅" placeholder="광장 채팅" maxlength="120" required autocomplete="off">
         <button type="submit">보내기</button>
       </div>
-      <button type="button" data-exit>나가기</button>
+      </div>
+      <button type="button" data-exit>광장 나가기</button>
       <p class="plaza-chat-status" role="status"></p>
     </form>`;
   document.body.append(stage);
@@ -35,10 +33,9 @@ export function mountPlaza(panel,getCharacter,{onJoin,onLeave,renderMembers,show
   const message=chat.elements.message;
   const chatStatus=chat.querySelector('[role=status]');
   const history=chat.querySelector('.plaza-chat-history');
-  const historyToggle=history.querySelector('.plaza-chat-summary');
+  const historyToggle=chat.querySelector('.plaza-chat-history-toggle');
   const historyPanel=history.querySelector('.plaza-chat-history-panel');
   const historyList=chat.querySelector('[data-chat-history]');
-  const emptyHistory=chat.querySelector('[data-chat-empty]');
   const historyPreview=chat.querySelector('[data-chat-preview]');
   function appendHistory(messages,members){
     if (!messages.length) return;
@@ -50,17 +47,17 @@ export function mountPlaza(panel,getCharacter,{onJoin,onLeave,renderMembers,show
       author.textContent=name || names.get(id) || '참가자';
       const body=document.createElement('span');
       body.textContent=text;
-      entry.append(author,body);
+      entry.append(author,': ',body);
       historyList.append(entry);
-      historyPreview.textContent=`${author.textContent}: ${text}`;
+      historyPreview.replaceChildren(author.cloneNode(true),': ',body.cloneNode(true));
     }
     while (historyList.children.length>10) historyList.firstElementChild.remove();
-    emptyHistory.hidden=Boolean(historyList.children.length);
     if (pinned) historyList.scrollTop=historyList.scrollHeight;
   }
   function setHistoryOpen(open){
     history.toggleAttribute('data-open',open);
     historyToggle.setAttribute('aria-expanded',String(open));
+    historyToggle.setAttribute('aria-label',open ? '채팅 내역 접기' : '채팅 내역 펼치기');
     historyPanel.inert=!open;
     if (open) historyList.scrollTop=historyList.scrollHeight;
   }
@@ -145,8 +142,7 @@ export function mountPlaza(panel,getCharacter,{onJoin,onLeave,renderMembers,show
     chat.reset();
     setHistoryOpen(false);
     historyList.replaceChildren();
-    emptyHistory.hidden=false;
-    historyPreview.textContent=emptyHistory.textContent;
+    historyPreview.textContent='아직 채팅이 없어요.';
     chatStatus.textContent='';
     button.textContent='입장';
     status.textContent=message;
