@@ -373,7 +373,7 @@
 .companion-ground {
   position: fixed;
   left: 50%;
-  bottom: env(safe-area-inset-bottom, 0px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) - var(--companion-scene-drop, 0px));
   z-index: 19;
   width: min(100%, var(--platform-width));
   aspect-ratio: var(--platform-ratio);
@@ -393,15 +393,10 @@
   background: var(--companion-platform-image) center bottom / 100% 100% no-repeat;
 }
 .companion-ground[data-map="spiritTree"] {
-  --companion-map-image: url('../img/map/arcana-spirit-tree-ground.png');
   --companion-platform-image: url('../img/map/arcana-spirit-tree-platforms.png');
 }
 .companion-ground[data-map="eurel"] {
-  --companion-map-image: url('../img/map/eurel.png');
   --companion-platform-image: url('../img/map/eurel-platforms.png');
-}
-.companion-ground[data-map="eurel"]::before {
-  clip-path: inset(88.485% 0 0);
 }
 .companion-ground[data-map="kerning"] {
   --companion-map-image: url('../img/map/kerning-city.png');
@@ -446,7 +441,7 @@ body.companion-visible:not([data-companion-map="none"])::before {
   content: '';
   position: fixed;
   left: 50%;
-  bottom: env(safe-area-inset-bottom, 0px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) - var(--companion-scene-drop, 0px));
   width: min(100%, var(--companion-backdrop-width));
   aspect-ratio: var(--companion-backdrop-ratio);
   background: var(--companion-backdrop) center bottom / 100% 100% no-repeat;
@@ -455,6 +450,16 @@ body.companion-visible:not([data-companion-map="none"])::before {
     #000 calc(var(--companion-fade-start, 0%) + clamp(40px, 24%, 180px)));
   transform: translateX(-50%);
   pointer-events: none;
+}
+.companion-ground-capped {
+  mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+}
+body.companion-visible.companion-backdrop-capped:not([data-companion-map="none"])::before {
+  mask-image: linear-gradient(to bottom,
+    transparent var(--companion-fade-start, 0%),
+    #000 calc(var(--companion-fade-start, 0%) + clamp(40px, 24%, 180px))),
+    linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+  mask-composite: intersect;
 }
 body.companion-visible #page { position: relative; z-index: 1; }
 .character-companion img {
@@ -593,7 +598,7 @@ body.companion-visible #page { position: relative; z-index: 1; }
 .character-companion[hidden], .character-companion img[hidden], .companion-ground[hidden], .companion-settings [hidden] { display: none; }
 .companion-form [data-saved][hidden] { display: none; }
 .companion-settings {
-  position: absolute;
+  position: fixed;
   inset: var(--companion-popup-top, 8px) var(--companion-popup-right, 8px) auto auto;
   box-sizing: border-box;
   width: min(410px, calc(100vw - var(--companion-popup-right, 8px) - 8px));
@@ -1433,6 +1438,7 @@ select:open + .hunt-select-arrow {
 .craft-summary #craftHint { color: var(--ink); font-size: .8125rem; }
 
 .capture-actions > button { inline-size: 8.4rem; min-block-size: 36px; padding: 6px 5px; font-size: .8125rem; }
+.capture-actions > :is(#huntPipBtn, [data-boss-pip]) { inline-size: 5rem; }
 .hunt-history-table { border-collapse: separate; border-spacing: 0 6px; }
 .hunt-history-table thead { color: var(--muted); }
 .hunt-history-table tbody td { background: var(--surface-soft); padding-block: 8px; }

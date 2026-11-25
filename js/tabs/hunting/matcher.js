@@ -250,7 +250,6 @@ export function detect(F, target, { allowScan = true, trackRadius = 3 } = {}) {
   const { main, reject, thr } = target;
   const accept = (c, need = thr) => {
     if (c.s < need) return false;
-    if (target.acceptPosition && !target.acceptPosition(c.x,c.y,main.w)) return false;
     if (target.colorMode) {
       c.chroma = iconChroma(F, main, c.x, c.y);
       const coloredRune = c.chroma.blue >= .30 && c.chroma.mean >= .14;
@@ -260,6 +259,7 @@ export function detect(F, target, { allowScan = true, trackRadius = 3 } = {}) {
     const strongShape = target.strongShape;
     const minColor = strongShape && c.s >= strongShape.score ? strongShape.minColor : target.minColor ?? .72;
     if (c.color < minColor) return false;
+    if (target.acceptPosition && !target.acceptPosition(c.x,c.y,main.w,c.s+c.color)) return false;
     if (reject && zncc(F.G, F.w, F.h, reject.full, c.x, c.y) > c.s + 0.025) return false;
     // 모서리가 버프 아이콘보다 스킬창 아이콘(키 번호 칸)에 확실히 더 가까우면 스킬창으로 보고 제외
     if (reject?.corner && main.corner && cornerScore(F, reject.corner, c.x, c.y) > cornerScore(F, main.corner, c.x, c.y) + 0.1) return false;

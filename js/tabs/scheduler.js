@@ -198,6 +198,12 @@ const dailyBossDifficulties = new Map([
   ['핑크빈', ['normal', 'chaos']], ['시그너스', ['normal']],
   ...['블러디퀸', '반반', '피에르', '벨룸'].map(name => [name, ['normal']])
 ]);
+const weeklyBossOrder = new Map([
+  '자쿰', '매그너스', '파풀라투스', '블러디퀸', '반반', '피에르', '벨룸',
+  '스우', '데미안', '가디언 엔젤 슬라임', '루시드', '윌', '더스크', '듄켈', '진 힐라',
+  '선택받은 세렌', '감시자 칼로스', '최초의 대적자', '카링', '벨로나', '찬란한 흉성',
+  '림보', '발드릭스', '유피테르'
+].map((name, index) => [name.replace(/\s+/g, ''), index]));
 const guestBossContents = Object.keys(BOSS_PRICES).map(entry => {
   const space = entry.indexOf(' ');
   const name = entry.slice(space + 1);
@@ -226,7 +232,12 @@ function groupBossContentsByCycle(bossItems, targetCycle) {
     grouped[name].difficulties[difficulty] = { ...item, originalIdx };
   });
 
-  return Object.values(grouped);
+  const bosses = Object.values(grouped);
+  if (targetCycle === 'weekly') {
+    const rank = boss => weeklyBossOrder.get(boss.name.replace(/\s+/g, '')) ?? weeklyBossOrder.size;
+    bosses.sort((a, b) => rank(a) - rank(b));
+  }
+  return bosses;
 }
 
 const taskRow = (key, name, checked, rightHtml = '') => `

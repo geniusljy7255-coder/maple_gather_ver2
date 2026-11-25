@@ -11,6 +11,9 @@ const similarGroups={multiplier:'bonus',bonus:'multiplier',
 const sameSlot=(a,b)=>Math.abs(a.x-b.x)<a.size*.40 && Math.abs(a.y-b.y)<a.size*.40;
 const matchScore=({hit})=>hit.score+hit.color;
 const modes=['wide-timer','minute-timer','coupon-top','vip-edges','buff-edges','potion-art'];
+const potionGroup=group=>group==='experience-potion' || group==='wealth-potion';
+// Shared frame and background colors in the potion reference images.
+const potionBackdrop=new Set([0x000000,0xffffff,0xbbccdd,0x88aacc]);
 const expIdentityGroup=group=>group==='multiplier' || group==='bonus' || group==='vip';
 function fitArtworkToSlot(main) {
   const size=Math.max(32,main.w,main.h);
@@ -26,14 +29,23 @@ function fitArtworkToSlot(main) {
 function templateFor(asset,size,mode='wide-timer'){
   const key=mode+'-'+size;
   if (!asset.templates.has(key)) {
-    const image=resizeIcon(asset.main,size);
+    let source=asset.main;
+    if (mode==='potion-art') {
+      const rgba=source.rgba.slice();
+      for(let p=0;p<rgba.length;p+=4){
+        const color=(rgba[p]<<16)|(rgba[p+1]<<8)|rgba[p+2];
+        if(potionBackdrop.has(color))rgba[p+3]=0;
+      }
+      source={...source,rgba};
+    }
+    const image=resizeIcon(source,size);
     if(mode==='bonus-badge' || mode==='coupon-top' || mode==='vip-mark' || mode==='vip-edges' || mode==='hud-header' || mode==='buff-edges' || mode==='gold-art' || mode==='potion-art'){
       const pixels=image.rgba.slice();
       for(let y=0;y<size;y++)for(let x=0;x<size;x++){
         const p=(y*size+x)*4;
         const outside=mode==='gold-art' ?
           (y>=size*.63 && x<size*.55) || pixels[p]<pixels[p+2]+48 || pixels[p+1]<pixels[p+2]+18 :
-          mode==='potion-art' ? (y>=size*.63 && x<size*.55) || (y>=size*.26 && y<size*.62 && x<size*.75) ||
+          mode==='potion-art' ? (y>=size*.63 && x<size*.55) ||
             Math.max(pixels[p],pixels[p+1],pixels[p+2])-Math.min(pixels[p],pixels[p+1],pixels[p+2])<34 :
           mode==='buff-edges' ? y>=size*.25 && (y<size*.74 || x<size*.65) :
           mode==='hud-header' ? y>=size*.35 :
@@ -232,7 +244,7 @@ function identityAt(region,asset,hit,refs){
   });
 }
 
-function findAsset(region,asset,large,format,neighbors=[],coupons=[]) {
+function findAsset(region,asset,large,format,neighbors=[],coupons=[],assets=[]) {
   const first=large?45:32;
   const nativeFirst=usesUnframedArtwork(asset.group) && asset.main.w===35;
   const candidates=asset.last ? [asset.last.size,first] :
@@ -240,11 +252,19 @@ function findAsset(region,asset,large,format,neighbors=[],coupons=[]) {
   const acceptPosition=asset.group==='luck' || asset.group==='wealth'
     ? (x,y,size)=>matchesUnionColor(region,x,y,size,asset.group)
     : expIdentityGroup(asset.group) ? (x,y,size)=>identityAt(region,asset,{x,y,size},coupons) : undefined;
+  const potionRivals=potionGroup(asset.group) ? assets.filter(other=>other.group===similarGroups[asset.group]) : [];
+  const acceptPotion=(x,y,size,score)=>{
+    return !potionRivals.some(rival=>{
+      const other=detect(region,{main:templateFor(rival,size,'potion-art'),minColor:.86,thr:.82,
+        readTimer:false,last:{x,y}},{allowScan:false,trackRadius:0});
+      return other.found && other.score+other.color>=score-.015;
+    });
+  };
   if(asset.last){
     const {size,mode}=asset.last;
     const main=templateFor(asset,size);
     const hit=detect(region,{main:templateFor(asset,size,mode),minColor:.90,thr:.87,
-      readTimer:false,acceptPosition,last:asset.last},{allowScan:false,trackRadius:2});
+      readTimer:false,acceptPosition:mode==='potion-art' ? acceptPotion : acceptPosition,last:asset.last},{allowScan:false,trackRadius:2});
     if(hit.found){
       let reading=readTimer(hit,main,format,region);
       if (!reading.seconds && nativeFirst && mode!=='buff-edges') {
@@ -267,7 +287,7 @@ function findAsset(region,asset,large,format,neighbors=[],coupons=[]) {
   let best=null,bestTimed=null;
   for (const size of new Set(candidates)) {
     const main=templateFor(asset,size);
-    const mode=asset.group==='gold' ? 'gold-art' : nativeFirst ? 'potion-art' : 'wide-timer';
+    const mode=asset.group==='gold' ? 'gold-art' : potionGroup(asset.group) ? 'potion-art' : 'wide-timer';
     const masked=mode!=='wide-timer';
     const target={main:mode==='gold-art' ? templateFor(asset,size,mode) : main,minColor:mode==='gold-art' ? .91 : .86,
       thr:.86,readTimer:false,acceptPosition,
@@ -276,8 +296,12 @@ function findAsset(region,asset,large,format,neighbors=[],coupons=[]) {
     const hit=(last && detect(region,{...target,last},{allowScan:false,trackRadius:3})) || {};
     let match=hit.found ? hit : detect(region,target);
     let matchedMode=mode==='gold-art' ? mode : 'wide-timer';
+    if (!match.found && mode==='gold-art') {
+      match=detect(region,{...target,main,minColor:.90});
+      matchedMode='wide-timer';
+    }
     if (!match.found && mode==='potion-art') {
-      match=detect(region,{...target,main:templateFor(asset,size,mode),minColor:.91});
+      match=detect(region,{...target,main:templateFor(asset,size,mode),minColor:.91,acceptPosition:acceptPotion});
       matchedMode=mode;
     }
     if (!match.found) continue;
@@ -457,7 +481,7 @@ export function scanExperienceBuffs(detector,frame,now,{onlyPending=false,maxGro
   const large=frame.w>=1800;
   const coupons=assets.filter(asset=>expIdentityGroup(asset.group));
   const hits=due.filter(asset=>asset.group!=='bonus' && !besideUnion(asset))
-    .map(asset=>findAsset(region,asset,large,frame.timerFormat,[],coupons)).filter(Boolean);
+    .map(asset=>findAsset(region,asset,large,frame.timerFormat,[],coupons,assets)).filter(Boolean);
   const anchors=assets.filter(asset=>isUnion(asset) && asset.last).map(asset=>asset.last);
   for(const asset of due.filter(besideUnion)){
     const hit=findAsset(region,asset,large,frame.timerFormat,anchors,coupons);

@@ -24,12 +24,12 @@ const walkConnection=0, jumpConnection=1;
 const footingCosts=[1,12,3,3];
 const footingY=([left,y,right,endY],x)=>y+(endY-y)*Math.max(0,Math.min(1,(x-left)/(right-left)));
 const platforms={
-  spiritTree:{width:3326,height:880,left:110,right:3216,y:704,foregroundTop:269,centered:true},
-  eurel:{width:3984,height:1650,left:110,right:3874,y:1460,foregroundTop:783,centered:true},
-  edelstein:{width:4588,height:1841,left:130,right:4458,y:1651,foregroundTop:180,centered:true},
-  ludibrium:{width:5385,height:1428,left:130,right:5255,y:1230,foregroundTop:142,centered:true},
-  kerning:{width:3870,height:1540,left:475,right:3395,y:1366,foregroundTop:132,centered:true},
-  nautilus:{width:4613,height:1557,left:130,right:4483,y:1505,foregroundTop:252,centered:true}
+  spiritTree:{width:3326,height:880,left:110,right:3216,y:704,foregroundTop:269},
+  eurel:{width:3984,height:1650,left:110,right:3874,y:1460,foregroundTop:783},
+  edelstein:{width:4588,height:1841,left:130,right:4458,y:1651,foregroundTop:180},
+  ludibrium:{width:5385,height:1428,left:130,right:5255,y:1230,foregroundTop:142},
+  kerning:{width:3870,height:1540,left:475,right:3395,y:1366,foregroundTop:132},
+  nautilus:{width:4613,height:1557,left:130,right:4483,y:1505,foregroundTop:252}
 };
 const mapImages={
   nautilus:'nautilus',ludibrium:'ludibrium',spiritTree:'arcana-spirit-tree-background',
@@ -123,6 +123,7 @@ export function mountCharacterCompanion(trigger){
   visitorHitbox.className='companion-hitbox';
   const ground=document.createElement('div');
   ground.className='companion-ground';
+
   ground.hidden=true;
   ground.setAttribute('aria-hidden','true');
   const chair=document.createElement('span');
@@ -423,6 +424,8 @@ export function mountCharacterCompanion(trigger){
   const ladderImages=new WeakMap();
   const swimImages=new WeakMap();
   let pose='walk', plazaSelf=null;
+  const workspace=document.getElementById('tabPanels');
+  let sceneWidth=0,sceneLeft=0;
   const plazaGuests=new Map();
   const plazaMessage=makeBalloon();
   plazaMessage.node.classList.add('companion-plaza-message');
@@ -601,8 +604,8 @@ export function mountCharacterCompanion(trigger){
     },12000+Math.random()*8000);
   }
   function setElevation(character,rise=footingPositions.get(character)?.rise ?? upperPlatforms.get(character)?.rise ?? 0){
-    const width=document.documentElement.clientWidth;
-    character.style.setProperty('--companion-elevation',rise*width/(platforms[ground.dataset.map]?.width ?? width)+'px');
+    const map=platforms[ground.dataset.map];
+    character.style.setProperty('--companion-elevation',(map ? rise*sceneWidth/map.width : 0)+'px');
   }
   function getMovementImages(actor,cache,actions){
     const {images,element:character}=actor;
@@ -622,16 +625,15 @@ export function mountCharacterCompanion(trigger){
     const width=document.documentElement.clientWidth;
     const platform=platforms[ground.dataset.map];
     if (platform) {
-      const scale=Math.min(width,platform.maxWidth ?? width)/platform.width;
-      const start=(width-scale*platform.width)/(platform.centered ? 2 : 1);
-      return {left:start+(upper?.left ?? platform.left)*scale,right:start+(upper?.right ?? platform.right)*scale};
+      const scale=sceneWidth/platform.width;
+      return {left:sceneLeft+(upper?.left ?? platform.left)*scale,right:sceneLeft+(upper?.right ?? platform.right)*scale};
     }
     const margin=Math.min(80,width/3);
     return {left:margin,right:width-margin};
   }
   function placeFooting(actor,x){
     const map=platforms[ground.dataset.map];
-    const screenX=x*document.documentElement.clientWidth/map.width;
+    const screenX=sceneLeft+x*sceneWidth/map.width;
     actor.x=screenX;
     actor.element.style.setProperty('--companion-x',screenX+'px');
   }
@@ -678,10 +680,10 @@ export function mountCharacterCompanion(trigger){
     const {element:character,images,showFrame:displayFrame,canWalk:allowed}=actor;
     const mapName=ground.dataset.map;
     const map=platforms[mapName];
-    const scale=document.documentElement.clientWidth/map.width;
+    const scale=sceneWidth/map.width;
     let position=footingPositions.get(character);
     if (!position) {
-      const x=actor.x/scale;
+      const x=(actor.x-sceneLeft)/scale;
       const id=footing.start.find(id=>x>=footing.surfaces[id][0] && x<=footing.surfaces[id][2]) ?? footing.start[0];
       const [left,,right]=footing.surfaces[id];
       position={id,x:Math.max(left,Math.min(right,x)),rise:0,route:[]};
@@ -787,28 +789,26 @@ export function mountCharacterCompanion(trigger){
     const upper=upperPlatforms.get(character);
     const {left,right}=walkBounds(upper);
     const map=ground.dataset.map;
-    const width=document.documentElement.clientWidth;
-    const scale=width/(platforms[map]?.width ?? width);
+    const scale=platforms[map] ? sceneWidth/platforms[map].width : 1;
     const jumpingFrames=getMovementImages(actor,jumpImages,['A06.0']);
-    const climbingFrames=map==='spiritTree'
-      ? getMovementImages(actor,ropeImages,['A09.0','A09.1']) : null;
-    const rope=climbingFrames && Math.random()<(upper ? .5 : .3)
+    const liftFrames=map==='spiritTree' ? getMovementImages(actor,ropeImages,['A09.0','A09.1']) : null;
+    const lift=liftFrames && Math.random()<(upper ? .5 : .3)
       ? upper ?? spiritTreeRopes[Math.floor(Math.random()*spiritTreeRopes.length)] : null;
-    const jump=!rope && jumpingFrames && Math.random()<.1
-      ? {x:from/scale,rise:0} : null;
-    const transition=jump || rope;
+    const jump=!lift && jumpingFrames && Math.random()<.1
+      ? {x:(from-sceneLeft)/scale,rise:0} : null;
+    const transition=jump || lift;
     const minDistance=(right-left)*.27;
     const leftRange=Math.max(0,from-minDistance-left);
     const rightRange=Math.max(0,right-from-minDistance);
     if (!transition && !leftRange && !rightRange) return;
     const choice=Math.random()*(leftRange+rightRange);
-    const landing=transition ? transition.x*scale : null;
+    const landing=transition ? sceneLeft+transition.x*scale : null;
     const takeoff=jump ? Math.max(left,Math.min(right,landing-100*scale)) : landing;
     const to=transition ? takeoff : choice<leftRange ? left+choice : from+minDistance+choice-leftRange;
     if (!transition && from===to) return;
     const duration=Math.abs(to-from)<1 ? 0 : Math.max(400,Math.abs(to-from)*9);
-    const transitionDuration=jump ? jumpDurationMs : rope ? Math.max(850,rope.rise*scale*11) : 0;
-    const transitionFrames=jump ? jumpingFrames : climbingFrames;
+    const transitionDuration=jump ? jumpDurationMs : lift ? Math.max(850,lift.rise*scale*11) : 0;
+    const transitionFrames=jump ? jumpingFrames : liftFrames;
     character.dataset.direction=to<from ? 'left' : 'right';
     let start;
     function nextFrame(){
@@ -882,7 +882,7 @@ export function mountCharacterCompanion(trigger){
     plazaName.hidden=true;
     plazaMessage.hide();
     for (const [id,actor] of plazaGuests) removePlazaGuest(id,actor);
-    sync();
+    alignScene();
   }
   function renderPlazaMembers(members,self){
     if (!plazaSelf) {
@@ -891,7 +891,7 @@ export function mountCharacterCompanion(trigger){
       plazaName.hidden=false;
       balloon.hide();
       stopVisits();
-      sync();
+      alignScene();
       if (!frames.length) void restore();
     }
     const current=new Set(members.filter(member=>member.id!==self).map(member=>member.id));
@@ -1086,7 +1086,7 @@ export function mountCharacterCompanion(trigger){
   const tabs=[...settingsPopup.querySelectorAll('[role=tab]')];
   function positionPopup(){
     const {right,bottom}=trigger.getBoundingClientRect();
-    settingsPopup.style.setProperty('--companion-popup-top',Math.max(8,bottom+8)+window.scrollY+'px');
+    settingsPopup.style.setProperty('--companion-popup-top',Math.max(8,bottom+8)+'px');
     settingsPopup.style.setProperty('--companion-popup-height',Math.max(96,window.innerHeight-bottom-16)+'px');
     settingsPopup.style.setProperty('--companion-popup-right',Math.max(8,document.documentElement.clientWidth-right)+'px');
   }
@@ -1130,7 +1130,20 @@ export function mountCharacterCompanion(trigger){
       tabs.find(tab=>tab.dataset.section===item.dataset.openSection).focus();
     });
   }
-  window.addEventListener('resize',positionPopup);
+  const headerActions=trigger.closest('.header-actions');
+  let popupFrame=0;
+  function followPopupAnchor(){
+    if (popupFrame) return;
+    popupFrame=requestAnimationFrame(()=>{
+      popupFrame=0;
+      if (!settingsPopup.matches(':popover-open')) return;
+      positionPopup();
+      repositionChoiceLists();
+      if (headerActions?.getAnimations().some(animation=>animation.playState==='running')) followPopupAnchor();
+    });
+  }
+  window.addEventListener('scroll',followPopupAnchor,{passive:true});
+  window.addEventListener('resize',followPopupAnchor);
   settingsPopup.addEventListener('beforetoggle',event=>{
     if (event.target!==settingsPopup) return;
     const opening=event.newState==='open';
@@ -1143,6 +1156,7 @@ export function mountCharacterCompanion(trigger){
       return;
     }
     positionPopup();
+    followPopupAnchor();
     mapSelect.value=ground.dataset.map;
     mapStatus.textContent='';
     if (chairs) {
@@ -1275,17 +1289,26 @@ export function mountCharacterCompanion(trigger){
   function alignScene(){
     const width=document.documentElement.clientWidth;
     const platform=platforms[ground.dataset.map];
+    const workspaceMaxWidth=workspace ? parseFloat(getComputedStyle(workspace).maxWidth) : NaN;
+    const mapMaxWidth=workspaceMaxWidth*76/72;
+    sceneWidth=platform && !plazaSelf && Number.isFinite(mapMaxWidth) ? Math.min(width,mapMaxWidth) : width;
+    sceneLeft=(width-sceneWidth)/2;
+    const capped=sceneWidth<width;
+    ground.classList.toggle('companion-ground-capped',capped);
+    document.body.classList.toggle('companion-backdrop-capped',capped);
     ground.classList.toggle('companion-platform',Boolean(platform));
     if (platform) {
-      const maxWidth=platform.maxWidth ? platform.maxWidth+'px' : '100%';
-      ground.style.setProperty('--platform-width',maxWidth);
+      ground.style.setProperty('--platform-width',sceneWidth+'px');
       ground.style.setProperty('--platform-ratio',platform.width+' / '+platform.height);
-      document.body.style.setProperty('--companion-backdrop-width',maxWidth);
+      document.body.style.setProperty('--companion-backdrop-width',sceneWidth+'px');
       document.body.style.setProperty('--companion-backdrop-ratio',platform.width+' / '+platform.height);
     }
-    const lift=platform ? (platform.height-platform.y)*Math.min(width,platform.maxWidth ?? width)/platform.width-14 : 0;
+    const floorDepth=platform ? (platform.height-platform.y)*sceneWidth/platform.width : 0;
+    const drop=platform && !plazaSelf ? Math.max(0,Math.min(32,floorDepth-18)) : 0;
+    document.body.style.setProperty('--companion-scene-drop',drop+'px');
+    const lift=platform ? floorDepth-14-drop : 0;
     document.body.style.setProperty('--companion-lift',lift+'px');
-    const foregroundHeight=platform ? (platform.height-platform.foregroundTop)*width/platform.width : 0;
+    const foregroundHeight=platform ? (platform.height-platform.foregroundTop)*sceneWidth/platform.width-drop : 0;
     document.body.style.setProperty('--companion-foreground-height',foregroundHeight+'px');
     for(const character of [sprite,visitor]) character.style.setProperty('--companion-lift',lift+'px');
     const {left,right}=walkBounds(upperPlatforms.get(sprite));

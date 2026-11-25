@@ -184,7 +184,7 @@ export async function initTracking() {
     experienceRetryUntil = 0;
     lastRuneGrab = 0;
     resetExperienceDetector();
-    if (!info.active) captureEnded();
+    if (!info.active) captureEnded(now);
     resetTrackers();
     pushConfig();
     if (info.active) submitFrame(now);

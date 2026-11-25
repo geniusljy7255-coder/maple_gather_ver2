@@ -111,7 +111,10 @@ export function handleMonitor(msg){
 }
 const announcedBuffDeadlines=new Map();
 let announcedCollectDeadline=0;
-export function captureEnded(){state.hunt.lastExp=null;state.hunt.fragmentBaseline=null;state.hunt.latestFragments=null;state.rune=createRuneState();state.booster={deadline:0,sample:null,confirmedAt:0};state.vision.expBuffs={};state.vision.lastAt=0;state.vision.fragmentsReadAt=0;announcedBuffDeadlines.clear();}
+export function captureEnded(now=Date.now()){
+  stopHunt(now,'화면 공유 종료');
+  state.hunt.lastExp=null;state.hunt.fragmentBaseline=null;state.hunt.latestFragments=null;state.rune=createRuneState();state.booster={deadline:0,sample:null,confirmedAt:0};state.vision.expBuffs={};state.vision.lastAt=0;state.vision.fragmentsReadAt=0;announcedBuffDeadlines.clear();
+}
 export function tick(now=Date.now()){
   const booster=state.booster;
   if(booster.deadline && now>=booster.deadline-1000 && booster.confirmedAt && !booster.alerted){

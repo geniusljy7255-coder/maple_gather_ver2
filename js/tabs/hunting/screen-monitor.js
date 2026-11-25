@@ -1,6 +1,6 @@
 import {readScreenText,parseExperience} from './screen-text.js';
-let expJump=null, expLower=null, expBox=null,expPending=null,fragmentPending=null,fragmentConfirmed=null,lastRun=0,lastExpSuccess=0;
-export function resetScreenMonitor(){expJump=null;expLower=null;expBox=null;expPending=null;fragmentPending=null;fragmentConfirmed=null;lastRun=0;lastExpSuccess=0;}
+let expJump=null, expBox=null,expPending=null,fragmentPending=null,fragmentConfirmed=null,lastRun=0,lastExpSuccess=0;
+export function resetScreenMonitor(){expJump=null;expBox=null;expPending=null;fragmentPending=null;fragmentConfirmed=null;lastRun=0;lastExpSuccess=0;}
 // Require every three-digit group even when the percent delimiter is damaged.
 const groupedExperienceRow = /^\s*(\d{1,3}(?:[,.]\d{3}){2,})(?=\s*\[|\s*$|\s*\??\s*(?:\d{1,2}[.,]\d{1,4}|\d{5})%\]?\s*$)/;
 function parseExperienceRow(text){
@@ -248,17 +248,10 @@ export function analyzeExperience(F,now) {
     const leveled = previous?.level != null && current.level === previous.level + 1;
     let stable = previousRaw !== null &&
       (nextRaw>=previousRaw && nextRaw-previousRaw<=previousRaw/100n+1000000000n || leveled);
+    // Keep the confirmed baseline when OCR reads a lower value without a level-up.
     if (previousRaw !== null && nextRaw < previousRaw && !leveled) {
-      // A momentary low OCR result must not turn a return to the true value into a gain.
-      const hits = expLower?.raw === current.raw && now-expLower.t < 2000 ? expLower.hits+1 : 1;
-      expLower = {raw:current.raw,t:now,hits};
-      if (hits >= 3) {
-        expPending = {...current,t:now};
-        expLower = null;
-        stable = true;
-      }
+      expJump = null;
     } else {
-      expLower = null;
       if (previousRaw !== null && !leveled && nextRaw > previousRaw) {
         const maxGain = previousRaw / 10000n + 1000000000n;
         const percentRegressed = previous.percent != null && current.percent != null && current.percent < previous.percent;
@@ -291,8 +284,9 @@ export function analyzeExperience(F,now) {
       exp.recheck=true;
       exp.reason='경험치 숫자 연속 확인 중';
       exp.value=null;
+      if (now-lastExpSuccess>3000) expBox=null;
     }
-  }else if(now-lastExpSuccess>3000){expBox=null; expJump=null; expLower=null;}
+  }else if(now-lastExpSuccess>3000){expBox=null; expJump=null;}
   return exp;
 }
 
@@ -420,7 +414,9 @@ export function analyzeScreen(F,results,now,earlyExperience){
       const firstIncrease=fragmentConfirmed===null && recent && count===previous.value+1 &&
         previous.confidence>=.90 && reading.confidence>=.90;
       fragmentPending={value:count,t:now,x:icon.x,y:icon.y,confidence:reading.confidence,hits:equal?previous.hits+1:1};
-      const trusted=fragmentPending.hits>=2 || (fragmentConfirmed===null && reading.confidence>=.97) || firstIncrease;
+      // A false low count would make the return to the true count look like loot.
+      const requiredHits=fragmentConfirmed!==null && count<fragmentConfirmed ? 3 : 2;
+      const trusted=fragmentPending.hits>=requiredHits || (fragmentConfirmed===null && reading.confidence>=.97) || firstIncrease;
       if (trusted) fragmentConfirmed=count;
       fragments={value:trusted?count:null,previous:firstIncrease?previous.value:null,text:reading.text,box};
     }
