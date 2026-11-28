@@ -96,11 +96,7 @@ export function expireInstallers(now) {
 function handleResult(msg) {
   if (!getInfo().active) return;
   const exp=msg.monitor?.exp;
-  if (exp?.recheck && (!experienceRetryUntil || msg.t>=experienceRetryUntil+5000)) {
-    experienceRetryUntil=msg.t+2500;
-  } else if (exp?.value && !exp.recheck) {
-    experienceRetryUntil=0;
-  }
+  if (exp) experienceRetryUntil=exp.recheck || !exp.value ? msg.t+3000 : 0;
   if (msg.monitor) {
     handleMonitor(msg);
     return;
@@ -158,7 +154,7 @@ function submitFrame(now) {
   if (scanInstallers && analyzeInstallers(frame,now)) lastInstallerGrab = now;
   if (scanMonitor) {
     const scanRune = now-lastRuneGrab>=runeScanInterval(sessionState.rune,now);
-    const scanFragments = now-(sessionState.vision.fragmentsReadAt ?? 0)>=10000;
+    const scanFragments = now-(sessionState.vision.fragmentsReadAt ?? 0)>=2500;
     const scanExperience = !externalExperience && now-lastExperienceGrab>=experienceInterval(now);
     if (analyzeMonitor(monitorFrame,now,externalExperience,scanRune,scanFragments,scanExperience)) {
       lastMonitorGrab = now;

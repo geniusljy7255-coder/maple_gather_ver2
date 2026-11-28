@@ -249,6 +249,10 @@ function findAsset(region,asset,large,format,neighbors=[],coupons=[],assets=[]) 
   const nativeFirst=usesUnframedArtwork(asset.group) && asset.main.w===35;
   const candidates=asset.last ? [asset.last.size,first] :
     [...(nativeFirst ? [asset.main.w,32,first] : [first,asset.main.w]),sizes[asset.cursor++%sizes.length]];
+  if (asset.group==='gold' && !asset.last) {
+    const hudSizes=[34,35,36,38,40,41,44,45];
+    candidates.push(hudSizes[(asset.cursor-1)%hudSizes.length]);
+  }
   const acceptPosition=asset.group==='luck' || asset.group==='wealth'
     ? (x,y,size)=>matchesUnionColor(region,x,y,size,asset.group)
     : expIdentityGroup(asset.group) ? (x,y,size)=>identityAt(region,asset,{x,y,size},coupons) : undefined;
@@ -463,7 +467,7 @@ export function scanExperienceBuffs(detector,frame,now,{onlyPending=false,maxGro
     if (onlyPending && !pending && !(active && record.deadline-now<=12000)) return false;
     if (onlyPending && pending && record.sample && now-record.sample.at<3500 &&
         record.sample.file!==asset.file && assets.some(other=>other.file===record.sample.file && other.last)) return false;
-    const often=asset.group==='bonus' || asset.group==='multiplier' || (unionSeen && besideUnion(asset));
+    const often=asset.group==='bonus' || asset.group==='multiplier' || asset.group==='gold' || (unionSeen && besideUnion(asset));
     const interval=active
       ? (record.deadline-now<=12000 ? 450 : record.approx || record.sample?.deadline!==record.deadline ? 5000 : 30000)
       : pending ? (now-record.pendingSince>6500 && !awaitingConfirmation(asset.group) ? 1500 : 450) :

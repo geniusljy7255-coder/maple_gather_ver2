@@ -93,8 +93,9 @@ export function handleMonitor(msg){
     state.vision={...state.vision,...msg.monitor,lastAt:msg.t};
     const count=msg.monitor.fragments?.value;
     if (count != null) state.vision.fragmentsReadAt = msg.t;
-    if (count!=null && state.hunt.latestFragments===null) {
-      observeFragments(state.hunt,msg.monitor.fragments.previous ?? count);
+    if (count!=null) {
+      const previous=msg.monitor.fragments.previous;
+      if (previous!=null || state.hunt.latestFragments===null) observeFragments(state.hunt,previous ?? count);
     }
     if(msg.monitor.exp?.value){
       const running=state.hunt.running;

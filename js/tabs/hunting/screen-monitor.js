@@ -264,9 +264,15 @@ export function analyzeExperience(F,now) {
           const percentAgrees=previousRaw===0n || previous.percent==null ||
             previous.percent<.01 || current.percent==null ||
             Math.abs(current.percent-previous.percent-
-              previous.percent*(Number(nextRaw-previousRaw)/Number(previousRaw)))<=.002;
-          const agrees = expJump?.raw === current.raw && now-expJump.t <= 6500;
-          expJump = percentAgrees ? {raw:current.raw,t:now} : null;
+              previous.percent*(Number(nextRaw-previousRaw)/Number(previousRaw)))<=.004;
+          // EXP can keep increasing between confirmation frames.
+          const candidateRaw=expJump ? BigInt(expJump.raw) : null;
+          const recent=expJump && now-expJump.t<=6500;
+          const moving=recent && expJump.percent!=null && current.percent!=null &&
+            current.percent>=expJump.percent && nextRaw>=candidateRaw &&
+            nextRaw-candidateRaw<=maxGain;
+          const agrees=recent && (expJump.raw===current.raw || moving);
+          expJump = percentAgrees ? {...current,t:now} : null;
           stable = Boolean(agrees && percentAgrees &&
             (current.percent == null || previous.percent == null || current.percent >= previous.percent));
         } else expJump = null;
@@ -284,9 +290,12 @@ export function analyzeExperience(F,now) {
       exp.recheck=true;
       exp.reason='경험치 숫자 연속 확인 중';
       exp.value=null;
-      if (now-lastExpSuccess>3000) expBox=null;
+      expBox=null;
     }
-  }else if(now-lastExpSuccess>3000){expBox=null; expJump=null;}
+  } else {
+    exp.recheck=true;
+    if(now-lastExpSuccess>3000){expBox=null; expJump=null;}
+  }
   return exp;
 }
 
@@ -407,18 +416,23 @@ export function analyzeScreen(F,results,now,earlyExperience){
     if (reading) {
       const count=Number(reading.text);
       const previous=fragmentPending;
-      // Successful fragment scans run ten seconds apart.
       const recent=previous && now-previous.t<=25000 &&
         Math.max(Math.abs(previous.x-icon.x),Math.abs(previous.y-icon.y))<=icon.size/2;
       const equal=recent && previous.value===count;
+      const below=fragmentConfirmed!==null && count<fragmentConfirmed;
+      // After a spend the remaining stack can grow before its new size is confirmed.
+      const recovering=below && recent && previous.value<fragmentConfirmed &&
+        count===previous.value+1 && previous.confidence>=.90 && reading.confidence>=.90;
+      const consecutive=equal || recovering;
       const firstIncrease=fragmentConfirmed===null && recent && count===previous.value+1 &&
         previous.confidence>=.90 && reading.confidence>=.90;
-      fragmentPending={value:count,t:now,x:icon.x,y:icon.y,confidence:reading.confidence,hits:equal?previous.hits+1:1};
-      // A false low count would make the return to the true count look like loot.
-      const requiredHits=fragmentConfirmed!==null && count<fragmentConfirmed ? 3 : 2;
-      const trusted=fragmentPending.hits>=requiredHits || (fragmentConfirmed===null && reading.confidence>=.97) || firstIncrease;
+      fragmentPending={value:count,t:now,x:icon.x,y:icon.y,confidence:reading.confidence,
+        hits:consecutive?previous.hits+1:1,start:consecutive?previous.start:count};
+      const trusted=fragmentPending.hits>=(below ? 3 : 2) ||
+        (fragmentConfirmed===null && reading.confidence>=.97) || firstIncrease;
+      const previousCount=firstIncrease ? previous.value : trusted && below ? fragmentPending.start : null;
       if (trusted) fragmentConfirmed=count;
-      fragments={value:trusted?count:null,previous:firstIncrease?previous.value:null,text:reading.text,box};
+      fragments={value:trusted?count:null,previous:previousCount,text:reading.text,box};
     }
   }
   return exp ? {exp,fragments} : {fragments};
